@@ -1,5 +1,7 @@
 const $ = (id) => document.getElementById(id);
 
+import { cutout } from '/cutout.js';
+
 const DEFAULTS = {
   refs: [
     { name: '纸巾包', w: 3.5, h: 5.5 },
@@ -163,6 +165,12 @@ function bind() {
     invalidate();
     draw();
   });
+  $('bright').addEventListener('input', () => {
+    if (view.phone) view.phone.bright = Number($('bright').value) / 100;
+    $('brightVal').textContent = `${$('bright').value}%`;
+    invalidate();
+    draw();
+  });
   $('btnPosAuto').addEventListener('click', () => {
     state.placement = { ...state.placement, mode: 'auto' };
     if (view.phone) {
@@ -302,6 +310,8 @@ async function useBaseImage(url, label) {
   $('sizeMul').value = 100;
   $('rotVal').textContent = '0°';
   $('sizeVal').textContent = '100%';
+  $('bright').value = 100;
+  $('brightVal').textContent = '100%';
   $('board').dataset.tool = 'ruler';
   $('btnSave').hidden = true;
   pickSizeFor(img.naturalWidth, img.naturalHeight);
@@ -515,17 +525,14 @@ function rebuildLayer() {
   g.fill();
   g.restore();
 
-  // 主体（带透视压缩）
+  // 主体（带透视压缩 + 影调匹配）
   g.save();
   g.rotate(rad);
   g.scale(1, squash);
+  const bright = phone.bright || 1;
+  if (bright !== 1) g.filter = `brightness(${bright})`;
   g.drawImage(phone.img, -geo.w / 2, -geo.h / 2, geo.w, geo.h);
-  if (phone.bright) {
-    g.globalCompositeOperation = 'source-atop';
-    g.fillStyle = phone.bright > 0 ? `rgba(255,255,255,${phone.bright})` : `rgba(0,0,0,${-phone.bright})`;
-    g.fillRect(-geo.w / 2, -geo.h / 2, geo.w, geo.h);
-    g.globalCompositeOperation = 'source-over';
-  }
+  g.filter = 'none';
   g.restore();
   g.restore();
 
@@ -715,6 +722,8 @@ function syncSliders() {
   $('rotVal').textContent = `${Math.round(phone.rot || 0)}°`;
   $('sizeVal').textContent = `${Math.round((phone.mul || 1) * 100)}%`;
   $('squashVal').textContent = `${Math.round((phone.squash || 1) * 100)}%`;
+  $('bright').value = String(Math.round((phone.bright || 1) * 100));
+  $('brightVal').textContent = `${Math.round((phone.bright || 1) * 100)}%`;
 }
 
 function drawRulerLine(g, ruler) {
@@ -857,145 +866,13 @@ function onPointerUp() {
 }
 
 /* --------------------------------------------------------------- 抠图 */
-
-function clamp8(value) {
-  return value < 0 ? 0 : value > 255 ? 255 : Math.round(value);
-}
-
-function cutout(img) {
-  const work = document.createElement('canvas');
-  work.width = img.naturalWidth;
-  work.height = img.naturalHeight;
-  const g = work.getContext('2d', { willReadFrequently: true });
-  g.drawImage(img, 0, 0);
-
-  const image = g.getImageData(0, 0, work.width, work.height);
-  const px = image.data;
-  const w = work.width;
-  const h = work.height;
-
-  for (let y = 0; y < h; y += 1) {
-    for (let x = 0; x < w; x += 1) {
-      const i = (y * w + x) * 4;
-      const r = px[i];
-      const gg = px[i + 1];
-      const b = px[i + 2];
-      const lum = 0.299 * r + 0.587 * gg + 0.114 * b;
-      const sat = Math.max(r, gg, b) - Math.min(r, gg, b);
-      // 白底 → 透明；白底上的灰影留一半，浅色但有彩度的物体整块留下
-      let alpha = Math.min(1, Math.max(0, (236 - lum) / 58));
-      if (sat > 24 && lum > 140) alpha = Math.max(alpha, 0.9);
-      alpha *= px[i + 3] / 255;
-
-      if (alpha < 0.05) {
-        px[i + 3] = 0;
-        continue;
-      }
-      if (alpha < 0.99) {
-        // 边缘是和白底混过的像素，先除掉白底，贴到别处才不会留一圈白边
-        const inv = 1 / alpha;
-        const outA = 255 * (1 - alpha);
-        px[i] = clamp8((px[i] - outA) * inv);
-        px[i + 1] = clamp8((px[i + 1] - outA) * inv);
-        px[i + 2] = clamp8((px[i + 2] - outA) * inv);
-      }
-      px[i + 3] = Math.round(alpha * 255);
-    }
-  }
-
-  // 先粗网格找最大连通块，水印那种角落小碎块会被排除掉
-  const G = 64;
-  const cw0 = work.width / G;
-  const ch0 = work.height / G;
-  const cell = new Float32Array(G * G);
-  for (let y = 0; y < h; y += 1) {
-    const gy = Math.min(G - 1, Math.floor(y / ch0));
-    for (let x = 0; x < w; x += 1) {
-      if (px[(y * w + x) * 4 + 3] > 150) cell[gy * G + Math.min(G - 1, Math.floor(x / cw0))] += 1;
-    }
-  }
-  const cellArea = cw0 * ch0;
-  const solid = new Uint8Array(G * G);
-  for (let i = 0; i < cell.length; i += 1) solid[i] = cell[i] > cellArea * 0.12 ? 1 : 0;
-
-  let best = null;
-  const seen = new Uint8Array(G * G);
-  for (let i = 0; i < solid.length; i += 1) {
-    if (!solid[i] || seen[i]) continue;
-    const stack = [i];
-    seen[i] = 1;
-    let count = 0;
-    let gx0 = G;
-    let gx1 = -1;
-    let gy0 = G;
-    let gy1 = -1;
-    while (stack.length) {
-      const idx = stack.pop();
-      const gx = idx % G;
-      const gy = (idx - gx) / G;
-      count += 1;
-      if (gx < gx0) gx0 = gx;
-      if (gx > gx1) gx1 = gx;
-      if (gy < gy0) gy0 = gy;
-      if (gy > gy1) gy1 = gy;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const nx = gx + dx;
-        const ny = gy + dy;
-        if (nx < 0 || ny < 0 || nx >= G || ny >= G) continue;
-        const nidx = ny * G + nx;
-        if (solid[nidx] && !seen[nidx]) {
-          seen[nidx] = 1;
-          stack.push(nidx);
-        }
-      }
-    }
-    if (!best || count > best.count) best = { count, gx0, gx1, gy0, gy1 };
-  }
-
-  if (!best || best.count < 4) return null;
-
-  // 在选中的块里按像素收紧边框
-  let x0 = Math.floor(best.gx0 * cw0);
-  let x1 = Math.min(w - 1, Math.ceil((best.gx1 + 1) * cw0));
-  let y0 = Math.floor(best.gy0 * ch0);
-  let y1 = Math.min(h - 1, Math.ceil((best.gy1 + 1) * ch0));
-  let ix0 = x1;
-  let iy0 = y1;
-  let ix1 = x0;
-  let iy1 = y0;
-  for (let y = y0; y <= y1; y += 1) {
-    for (let x = x0; x <= x1; x += 1) {
-      if (px[(y * w + x) * 4 + 3] > 150) {
-        if (x < ix0) ix0 = x;
-        if (x > ix1) ix1 = x;
-        if (y < iy0) iy0 = y;
-        if (y > iy1) iy1 = y;
-      }
-    }
-  }
-  const pad = 3;
-  x0 = Math.max(0, ix0 - pad);
-  y0 = Math.max(0, iy0 - pad);
-  x1 = Math.min(w - 1, ix1 + pad);
-  y1 = Math.min(h - 1, iy1 + pad);
-
-  const cw = x1 - x0 + 1;
-  const ch = y1 - y0 + 1;
-  if (cw < 60 || ch < 60) return null;
-
-  g.putImageData(image, 0, 0);
-  const out = document.createElement('canvas');
-  out.width = cw;
-  out.height = ch;
-  out.getContext('2d').drawImage(work, x0, y0, cw, ch, 0, 0, cw, ch);
-  return out;
-}
+/* 白底抠图在 ./cutout.js，测试页可以直接复用 */
 
 /* --------------------------------------------------------------- 提示词 */
 
 function subjectPrompt() {
   const desc = ($('prompt').value || DEFAULT_SUBJECT).trim();
-  return `${desc}。正俯视图：镜头垂直向下 90°，正交投影，物体平铺在纯白色背景上，没有透视、没有斜角、没有侧立面；画面里只有这一个物体，没有别的物品、没有文字、没有水印，光线均匀。主体要和白色背景形成明显对比，不要画成白色或浅色的。`;
+  return `${desc}。正俯视图：镜头垂直向下 90°，正交投影，物体平放在桌面、从上往下看，没有透视、没有斜角、没有侧立面；画面里只有这一个物体，没有别的物品、没有文字、没有水印。背景是一整块均匀的纯白色，没有渐变；物体四周不要有投影、不要有阴影、不要有光晕。主体要和背景形成明显对比：物品本身是深色或彩色就如实画；是白色或浅色时，请在轮廓上加一圈清晰的浅灰分界线，让边缘能分辨。`;
 }
 
 /* ------------------------------------------------ 名称 → 描述 + 尺寸 */
@@ -1205,6 +1082,79 @@ async function runJob(job) {
   }
 }
 
+/* ------------------------------------------------------- 影调匹配 */
+
+/** 复用一块小画布量亮度，省得每次新建 */
+function measureCtx() {
+  if (!measureCtx.c) {
+    measureCtx.c = document.createElement('canvas');
+    measureCtx.c.width = 64;
+    measureCtx.c.height = 64;
+  }
+  measureCtx.c.getContext('2d').clearRect(0, 0, 64, 64);
+  return measureCtx.c.getContext('2d', { willReadFrequently: true });
+}
+
+/** 取中位数当「这个区域有多亮」：比平均值抗干扰（数据线、纸巾包压不垮它） */
+function medianLum(data, minAlpha = 0) {
+  const vals = [];
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < minAlpha) continue;
+    vals.push(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+  }
+  if (!vals.length) return 0;
+  vals.sort((a, b) => a - b);
+  return vals[Math.floor(vals.length * 0.5)];
+}
+
+/** 主体自身的亮度（只算不透明像素），算一次就挂在 canvas 上 */
+function subjectLum(img) {
+  if (img.__lum) return img.__lum;
+  const g = img.getContext('2d', { willReadFrequently: true });
+  const step = Math.max(1, Math.floor(Math.max(img.width, img.height) / 160));
+  const w = Math.max(1, Math.floor(img.width / step));
+  const h = Math.max(1, Math.floor(img.height / step));
+  const small = document.createElement('canvas');
+  small.width = w;
+  small.height = h;
+  const sg = small.getContext('2d', { willReadFrequently: true });
+  sg.drawImage(img, 0, 0, w, h);
+  const lum = medianLum(sg.getImageData(0, 0, w, h).data, 200);
+  img.__lum = lum || 0;
+  return img.__lum;
+}
+
+/**
+ * 模型是在摄影棚强光下画的主体，你的底图往往偏暗偏暖，
+ * 直接贴上去就是「一张亮图盖在暗桌上」。这里按主体所在区域的底图亮度
+ * 给主体算一个亮度系数（只压暗不调亮，最多压到 45%），让两者像一个光线下拍的。
+ */
+function matchSubjectBrightness() {
+  const phone = view.phone;
+  if (!phone || !view.base) return;
+  const geo = phoneSize();
+  if (!geo) return;
+
+  const bx = Math.max(0, Math.round(phone.cx - geo.w / 2));
+  const by = Math.max(0, Math.round(phone.cy - geo.h / 2));
+  const bw = Math.min(view.base.naturalWidth - bx, Math.round(geo.w));
+  const bh = Math.min(view.base.naturalHeight - by, Math.round(geo.h));
+  if (bw < 8 || bh < 8) return;
+
+  const g = measureCtx();
+  g.drawImage(view.base, bx, by, bw, bh, 0, 0, 64, 64);
+  const baseLum = medianLum(g.getImageData(0, 0, 64, 64).data);
+  const subjLum = subjectLum(phone.img);
+  if (!baseLum || !subjLum) return;
+
+  // 底图比主体暗多少，就把主体压暗多少；不调亮（调亮会显得更假）
+  let ratio = baseLum / subjLum;
+  ratio = Math.min(1.05, Math.max(0.45, ratio));
+  // 别做无谓的微调
+  if (Math.abs(ratio - 1) < 0.04) ratio = 1;
+  phone.bright = Math.round(ratio * 100) / 100;
+}
+
 /* --------------------------------------------------------------- 候选 */
 
 function addCandidate(cut, meta) {
@@ -1241,6 +1191,7 @@ function applyCandidate(candidate, opts = {}) {
   };
   setTool('move');
   if (opts.autoPlace) autoPlace();
+  matchSubjectBrightness(); // 自动把主体压到底图那个光照水平
   syncSliders();
   invalidate();
   draw();
