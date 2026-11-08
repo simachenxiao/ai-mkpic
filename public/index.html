@@ -35,6 +35,25 @@
       <div class="layout">
         <!-- ---------------------------------------------------- 左：参数 -->
         <aside class="panel" aria-label="生成参数">
+          <section class="block block-quick">
+            <div class="block-head">
+              <h2>物品名称</h2>
+              <span class="sub">回车 = 一步生成</span>
+            </div>
+            <div class="quick">
+              <input
+                class="input"
+                id="itemName"
+                placeholder="例如：AirPods Pro 充电盒 / 马克杯 / 口红"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="物品名称"
+              />
+              <button class="btn btn-primary btn-tiny" id="btnQuick" type="button">一键生成</button>
+            </div>
+            <p class="hint" id="quickHint">只写名称就行：AI 会自动写好主体描述（已含正俯视）和实物尺寸，然后直接开始生成。</p>
+          </section>
+
           <section class="block">
             <div class="block-head">
               <h2>参考图</h2>

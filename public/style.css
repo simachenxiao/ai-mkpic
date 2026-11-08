@@ -292,6 +292,43 @@ h2 {
   border-bottom: 0;
 }
 
+/* ---------------------------------------------------------- 一键生成 */
+
+.block-quick {
+  background: linear-gradient(180deg, var(--accent-soft), transparent 92%);
+}
+
+.quick {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.quick .input {
+  height: 34px;
+  font-size: 14px;
+}
+
+.quick .btn {
+  height: 34px;
+  white-space: nowrap;
+}
+
+.block-quick.is-busy .quick .input {
+  border-color: var(--accent);
+}
+
+.block-quick.is-busy #btnQuick {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.block-quick .hint b {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .block-head {
   display: flex;
   align-items: baseline;
@@ -317,6 +354,10 @@ h2 {
 
 .hint[hidden] {
   display: none;
+}
+
+.hint.is-warn {
+  color: #b4532a;
 }
 
 /* ---------------------------------------------------------- reference */

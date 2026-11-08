@@ -3,3 +3,4 @@ server.log
 .env
 .playwright-cli/
 backup/
+cache/

@@ -23,6 +23,15 @@ const API_KEY = (process.env.IMAGE_API_KEY || '').trim();
 const UPSTREAM_TIMEOUT = Number(process.env.IMAGE_TIMEOUT_MS || 300000);
 const AUTO_OPEN = process.argv.includes('--open');
 
+/* 对话模型：只用来「输入物品名称 → 描述 + 尺寸」 */
+const LLM_BASE_URL = (process.env.LLM_BASE_URL || 'https://api.deepseek.com/v1').replace(/\/+$/, '');
+const LLM_API_KEY = (process.env.LLM_API_KEY || '').trim();
+const LLM_MODEL = (process.env.LLM_MODEL || 'deepseek-flash').trim();
+const LLM_TIMEOUT = Number(process.env.LLM_TIMEOUT_MS || 90000);
+
+const CACHE_DIR = path.join(ROOT, 'cache');
+const ITEM_CACHE_FILE = path.join(CACHE_DIR, 'items.json');
+
 /** 上游实测支持的模型；reference 表示是否真的吃得下参考图 */
 const MODELS = [
   {
@@ -83,6 +92,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && pathname === '/api/history') return await handleHistory(res);
     if (req.method === 'GET' && pathname === '/api/scene') return await handleScene(res, url);
     if (req.method === 'POST' && pathname === '/api/scene') return await handleSceneSave(req, res, url);
+    if (req.method === 'POST' && pathname === '/api/describe') return await handleDescribe(req, res);
     if (req.method === 'POST' && pathname === '/api/generate') return await handleGenerate(req, res);
     if (req.method === 'POST' && pathname === '/api/save') return await handleSave(req, res);
     if (req.method === 'POST' && pathname === '/api/reveal') return await handleReveal(res);
@@ -118,6 +128,9 @@ server.listen(PORT, () => {
   console.log(`  ${local}`);
   console.log(`  上游：${BASE_URL}/images/generations`);
   console.log(`  API Key：${API_KEY ? `${API_KEY.slice(0, 8)}…${API_KEY.slice(-4)}` : '未配置（请在 .env 里填写）'}`);
+  console.log(
+    `  描述/尺寸：${LLM_API_KEY ? `${LLM_MODEL} @ ${hostOf(LLM_BASE_URL)}` : '未配置 LLM_API_KEY（退回本地粗估）'}`,
+  );
   console.log('');
   if (AUTO_OPEN && process.platform === 'win32') {
     import('node:child_process').then(({ spawn }) =>
@@ -136,7 +149,237 @@ function handleConfig(res) {
     baseUrl: BASE_URL,
     defaultBaseImage: '/base.jpg',
     outputDir: path.relative(ROOT, OUTPUT_DIR) + path.sep,
+    llm: { hasKey: Boolean(LLM_API_KEY), model: LLM_MODEL, host: hostOf(LLM_BASE_URL) },
   });
+}
+
+/* --------------------------------------------------- 名称 → 描述 + 尺寸 */
+
+const DESCRIBE_SYSTEM = `你是产品布景师。用户给你一个物品名称，你返回它的「文生图描述」和「俯视轮廓尺寸」。
+
+输出规则：
+- 只输出一个 JSON 对象，不要解释，不要 markdown 代码块。
+- 字段：{"desc": string, "w": number, "h": number}
+- desc：中文，30~60 字，只描述物品外观本身——颜色、材质、光泽、形态、关键细节（按钮/接口/指示灯的位置）。
+- desc 里严禁出现：俯视、俯拍、镜头、角度、背景、白色背景、构图、摆放、画布、光线、拍摄、尺寸、价格、品牌口号。
+
+尺寸规则（重要）：
+- w / h 是「物品平放在桌面上、从上往下看所占矩形」的短边与长边，单位厘米，保留一位小数；
+- 不是高度，也不是厚度。杯子/圆柱取直径，不要取高；手机/充电盒取平放时的宽与长（厚度不算）；
+- 必要时可互换：保证 w <= h。
+
+示例：
+- 「马克杯」→ {"desc":"一只白色亮面陶瓷马克杯，杯身圆柱形略微上宽下窄，杯口圆整，右侧一体式弧形手柄","w":8,"h":11}（11 是带手柄的总长）
+- 「AirPods Pro 充电盒」→ {"desc":"白色亮面塑料充电盒，圆角矩形扁平机身，顶部翻盖接缝，正面小状态指示灯，底部充电口","w":4.5,"h":6.1}`;
+
+/** 常见物品的兜底尺寸，LLM 不可用时也能给出可用值 */
+const LOCAL_ITEMS = [
+  { test: /手机|iphone|智能机|smartphone|pixel|小米|华为/i, w: 7.2, h: 15.2, desc: '一部平放的黑色智能手机，屏幕朝上、息屏，圆角机身边框，摄像头模组在背面' },
+  { test: /平板|ipad|tablet/i, w: 17.5, h: 25, desc: '一台平放的深色平板电脑，屏幕朝上、息屏，金属直边框，四角圆润' },
+  { test: /笔记本|macbook|laptop|电脑/i, w: 22, h: 32, desc: '一台合上的银色笔记本电脑，铝合金外壳，边缘圆角，顶盖中心有品牌标识' },
+  { test: /充电盒|耳机盒|airpods|充电仓/i, w: 4.5, h: 6.1, desc: '一个白色亮面塑料耳机充电盒，圆角矩形扁平机身，正面小指示灯，底部充电口' },
+  { test: /耳机|earphone|earbud/i, w: 2, h: 3.2, desc: '一副白色入耳式无线耳机，圆润光滑，带短柄' },
+  { test: /马克杯|杯子|水杯|茶杯|咖啡杯/i, w: 8, h: 11, desc: '一只白色亮面陶瓷马克杯，圆柱形杯身略微上宽下窄，右侧一体式弧形手柄' },
+  { test: /口红|唇膏/i, w: 2, h: 2, desc: '一支黑色金属外壳口红，细长圆柱身，中段一圈金色饰环' },
+  { test: /手表|手环|watch/i, w: 4, h: 4.6, desc: '一块深色方形表盘的智能手表，金属边框，左侧一枚圆形表冠' },
+  { test: /钥匙/i, w: 2.2, h: 6, desc: '一把黄铜色金属钥匙，齿形清晰，柄部圆孔' },
+  { test: /眼镜|墨镜/i, w: 5.5, h: 14, desc: '一副黑色细框眼镜，镜片透明，镜腿折起平放' },
+  { test: /钱包|卡包/i, w: 9.5, h: 11.5, desc: '一个深棕色皮质短款钱包，翻盖接缝清晰，边缘缝线' },
+  { test: /遥控器/i, w: 4.5, h: 17, desc: '一只黑色塑料遥控器，长条形，表面有按键阵列与圆形方向键' },
+];
+
+function localEstimate(name) {
+  const hit = LOCAL_ITEMS.find((item) => item.test.test(name));
+  if (hit) return { desc: hit.desc, w: hit.w, h: hit.h };
+  return { desc: `${name}，实物外观完整、边缘清晰，主体用深色或与纯白背景对比强烈的颜色`, w: 8, h: 12 };
+}
+
+const ITEM_PROMPT_VERSION = 2; // 提示词改了就加一，缓存自动失效
+
+async function handleDescribe(req, res) {
+  const body = await readJson(req, 8 * 1024);
+  const name = String(body.name || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!name) return json(res, 400, { error: '先写个物品名称，比如「马克杯」。' });
+  if (name.length > 60) return json(res, 400, { error: '名称太长了，60 字以内就够。' });
+
+  const force = body.refresh === true;
+  const cacheKey = name.toLowerCase().replace(/[\s\-_/]+/g, '');
+
+  if (!force) {
+    const cache = await readItemCache();
+    const hit = cache[cacheKey];
+    if (hit?.source === 'llm' && hit.pv === ITEM_PROMPT_VERSION) {
+      return json(res, 200, { ...hit, name, cached: true, ms: 0 });
+    }
+  }
+
+  if (!LLM_API_KEY) {
+    const local = localEstimate(name);
+    return json(res, 200, {
+      name,
+      ...local,
+      source: 'local',
+      cached: false,
+      warning: '没有配置 LLM_API_KEY，这次是本地粗估的尺寸。',
+    });
+  }
+
+  const t0 = Date.now();
+  try {
+    const raw = await askLLM(name);
+    const dims = normDims(raw.w, raw.h);
+    const desc = cleanDesc(raw.desc);
+    if (!desc) throw new Error('模型没给出可用的描述');
+    if (!dims.w || !dims.h) throw new Error('模型没给出可用的尺寸');
+
+    const entry = {
+      name,
+      desc,
+      w: dims.w,
+      h: dims.h,
+      source: 'llm',
+      model: LLM_MODEL,
+      pv: ITEM_PROMPT_VERSION,
+      ms: Date.now() - t0,
+    };
+    await writeItemCache(cacheKey, entry);
+    console.log(`[describe] ${name} → ${entry.w}×${entry.h} cm ${entry.ms}ms（已缓存）`);
+    return json(res, 200, entry);
+  } catch (err) {
+    const local = localEstimate(name);
+    console.error('[describe]', name, err?.message || err);
+    return json(res, 200, {
+      name,
+      ...local,
+      source: 'local',
+      cached: false,
+      warning: `对话模型没返回可用结果（${err?.message || err}），先用本地粗估。`,
+    });
+  }
+}
+
+async function askLLM(name) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT);
+    try {
+      const upstream = await fetch(`${LLM_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${LLM_API_KEY}`,
+          'Content-Type': 'application/json; charset=utf-8',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          model: LLM_MODEL,
+          messages: [
+            { role: 'system', content: DESCRIBE_SYSTEM },
+            { role: 'user', content: `物品名称：${name}` },
+          ],
+          temperature: 0,
+          max_tokens: 4000,
+          stream: false,
+          response_format: { type: 'json_object' },
+        }),
+        signal: controller.signal,
+      });
+
+      const text = await upstream.text();
+      let data = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        /* 非 JSON */
+      }
+
+      if (!upstream.ok) {
+        const msg = data?.error?.message || data?.message || text.slice(0, 300) || `HTTP ${upstream.status}`;
+        throw new Error(msg);
+      }
+
+      const content = data?.choices?.[0]?.message?.content;
+      if (!content) {
+        const reason = data?.choices?.[0]?.finish_reason || '空内容';
+        throw new Error(`模型返回空内容（${reason}）`);
+      }
+      return parseJsonLoose(content);
+    } catch (err) {
+      lastError = err?.name === 'AbortError' ? new Error('对话模型超时') : err;
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 600));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError || new Error('对话模型请求失败');
+}
+
+/** 模型偶尔会带 ```json 围栏或多说两句，这里都宽容处理 */
+function parseJsonLoose(text) {
+  const raw = String(text || '').trim();
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = fenced ? fenced[1] : raw;
+  const start = body.indexOf('{');
+  const end = body.lastIndexOf('}');
+  const slice = start >= 0 && end > start ? body.slice(start, end + 1) : body;
+  try {
+    return JSON.parse(slice);
+  } catch {
+    throw new Error('模型返回的不是 JSON');
+  }
+}
+
+/** 去掉模型顺手加上的视角/背景词，避免和前端固定的「正俯视」措辞打架 */
+function cleanDesc(text) {
+  let s = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^["'「『（(]+/, '')
+    .replace(/["'」』）)]+$/, '');
+  s = s
+    .split(/[。；;\n]/)
+    .filter((part) => !/(俯视|俯拍|镜头|角度|背景|构图|摆放|画布|光线|拍摄)/.test(part))
+    .join('，')
+    .replace(/[，,、\s]+/g, '，')
+    .replace(/^[，,、\s]+|[，,、\s]+$/g, '');
+  return s;
+}
+
+function normDims(w, h) {
+  const clamp = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.round(Math.min(400, Math.max(0.3, n)) * 10) / 10;
+  };
+  let a = clamp(w);
+  let b = clamp(h);
+  if (a && b && a > b) [a, b] = [b, a];
+  return { w: a, h: b };
+}
+
+async function readItemCache() {
+  try {
+    return JSON.parse(await readFile(ITEM_CACHE_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+async function writeItemCache(key, entry) {
+  const all = await readItemCache();
+  all[key] = entry;
+  await mkdir(CACHE_DIR, { recursive: true });
+  await writeFile(ITEM_CACHE_FILE, `${JSON.stringify(all, null, 2)}\n`, 'utf8');
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 /** 在系统文件管理器里打开 output/，省得用户自己找 */

@@ -25,6 +25,7 @@ const state = {
   refLabel: 'base.jpg',
   scene: null,
   placement: { mode: 'auto', x: 0, y: 0 },
+  quickBusy: false,
 };
 
 const view = {
@@ -76,6 +77,11 @@ async function boot() {
   syncModel();
   buildRulerRefOptions();
 
+  const llm = config.llm || {};
+  $('quickHint').innerHTML = llm.hasKey
+    ? `只写名称就行：回车后由 <b>${escapeHtml(llm.model || 'LLM')}</b> 写好主体描述（已含正俯视）和实物尺寸，然后直接开始生成。`
+    : '只写名称就行：没配 LLM_API_KEY，会用本地粗估的尺寸和模板描述，然后直接开始生成。';
+
   await loadBase(config.defaultBaseImage);
   await loadHistory();
   bind();
@@ -105,6 +111,15 @@ function bind() {
 
   $('btnMain').addEventListener('click', generateSubject);
   $('btnSubject').addEventListener('click', generateSubject);
+
+  $('btnQuick').addEventListener('click', quickGenerate);
+  $('itemName').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.isComposing) {
+      e.preventDefault();
+      quickGenerate();
+    }
+  });
+  $('itemName').addEventListener('input', () => $('quickHint').classList.remove('is-warn'));
   $('btnExport').addEventListener('click', exportComposite);
   $('btnRemeasure').addEventListener('click', () => {
     view.tool = 'ruler';
@@ -974,6 +989,86 @@ function subjectPrompt() {
   return `${desc}。正俯视图：镜头垂直向下 90°，正交投影，物体平铺在纯白色背景上，没有透视、没有斜角、没有侧立面；画面里只有这一个物体，没有别的物品、没有文字、没有水印，光线均匀。主体要和白色背景形成明显对比，不要画成白色或浅色的。`;
 }
 
+/* ------------------------------------------------ 名称 → 描述 + 尺寸 */
+
+/** 一步到底：名称 → LLM 出描述+尺寸 → 填表单 → 直接开始生图 */
+async function quickGenerate() {
+  const name = $('itemName').value.trim();
+  if (!name) {
+    setStatus('先写个物品名称，比如「马克杯」。', 'error');
+    $('itemName').focus();
+    return;
+  }
+  if (state.quickBusy) return;
+
+  state.quickBusy = true;
+  const panel = document.querySelector('.block-quick');
+  panel?.classList.add('is-busy');
+  $('btnQuick').disabled = true;
+  $('quickHint').classList.remove('is-warn');
+  $('quickHint').textContent = `正在为「${name}」估算描述和尺寸…`;
+  setStatus(`正在让模型写「${name}」的描述和尺寸…`, '');
+
+  const t0 = Date.now();
+  try {
+    const info = await describeItem(name);
+    applyItemInfo(info);
+
+    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    const src = info.source === 'llm' ? (info.cached ? `缓存 ${info.model || ''}` : `AI ${info.model || ''}`) : '本地粗估';
+    $('quickHint').innerHTML = `「<b>${escapeHtml(name)}</b>」→ <b>${trim(info.w)} × ${trim(info.h)} cm</b>、描述已填好（${escapeHtml(src.trim())}，${secs}s）。已开始生成主体。`;
+    if (info.warning) {
+      $('quickHint').classList.add('is-warn');
+      $('quickHint').innerHTML += `<br>${escapeHtml(info.warning)}`;
+    }
+    setStatus(`「${name}」按 ${trim(info.w)} × ${trim(info.h)} cm 已开抽，可以继续输入下一个名称。`, 'ok');
+
+    // 一步到底：直接开生图（多请求互不阻塞，已有逻辑支持并发）
+    generateSubject();
+  } catch (err) {
+    $('quickHint').textContent = `没拿到「${name}」的描述：${err.message}`;
+    $('quickHint').classList.add('is-warn');
+    setStatus(err.message, 'error');
+  } finally {
+    state.quickBusy = false;
+    panel?.classList.remove('is-busy');
+    $('btnQuick').disabled = false;
+    $('itemName').select();
+  }
+}
+
+async function describeItem(name) {
+  const res = await fetch('/api/describe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `描述接口 HTTP ${res.status}`);
+  if (!data.desc || !data.w) throw new Error('模型没给出可用的描述或尺寸');
+  return data;
+}
+
+/** 把名称/描述/尺寸填进表单（尺寸参照里的「目标行」跟这是同一份数据） */
+function applyItemInfo(info) {
+  const name = String(info.name || $('itemName').value || '').trim()
+    || '新物体';
+  $('itemName').value = name;
+  $('targetName').value = name;
+  $('targetW').value = String(trim(Number(info.w) || 0));
+  $('targetH').value = String(trim(Number(info.h) || Number(info.w) || 0));
+  if (info.desc) $('prompt').value = String(info.desc).trim();
+
+  buildRulerRefOptions();
+  updateAll();
+  invalidate();
+  draw();
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+}
+
 function scaleClause() {
   const target = readTarget();
   const refs = readRefs().filter((r) => r.w > 0);
@@ -1182,6 +1277,7 @@ async function callGenerate(body, signal) {
   });
   const data = await res.json().catch(() => ({ error: '上游返回了无法解析的内容' }));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!data.image) throw new Error(data.error || '上游没给出图片，再点一次试试。');
   if (data.warning) setStatus(data.warning, 'error');
   return data;
 }
@@ -1322,7 +1418,7 @@ function updateBoardNote() {
   if (!pxPerCm()) {
     note.textContent = `① 在底图上沿${rulerRef().name}最长的一边拖一条线，把厘米换成像素`;
   } else if (!view.phone) {
-    note.textContent = `② 写一句描述，点“生成主体”——白底会自动抠图，并按 ${trim(readTarget().w)} cm 放进空位`;
+    note.textContent = `② 写个物品名称按回车（或一句描述）——白底会自动抠图，并按 ${trim(readTarget().w)} cm 放进空位`;
   } else if (view.eraseOn) {
     note.textContent = '在压住它的东西上刷：露回底图就是遮挡（数据线、纸巾包边、桌角）';
   } else {
@@ -1517,6 +1613,7 @@ function applyExample() {
     invalidate();
   }
   $('prompt').value = DEFAULT_SUBJECT;
+  $('itemName').value = DEFAULTS.target.name;
   buildRulerRefOptions();
   updateAll();
   draw();
