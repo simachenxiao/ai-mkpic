@@ -56,6 +56,15 @@ function otsuThreshold(hist, total) {
   return best;
 }
 
+/** 背景色是哪种幕布：绿幕/蓝幕要额外做溢色抑制 */
+function classifyKey(key) {
+  const [r, g, b] = key;
+  if (g - Math.max(r, b) >= 36) return 'green';
+  if (b - Math.max(r, g) >= 36) return 'blue';
+  if (r - Math.max(g, b) >= 36) return 'red';
+  return 'neutral';
+}
+
 /** 这个像素处有没有「边缘」（软阴影没有，物体轮廓有） */
 const EDGE_GRAD = 7;
 
@@ -106,6 +115,25 @@ export function cutout(img) {
   const N = w * h;
 
   const key = sampleKey(px, w, h);
+  const keyKind = classifyKey(key);
+  const chromatic = keyKind !== 'neutral';
+  const keyLum = 0.299 * key[0] + 0.587 * key[1] + 0.114 * key[2];
+
+  /**
+   * 「这个像素是不是幕布」——有色幕布按色相判，比按色差更宽：
+   * 洞里的绿、幕布上偏暗的投影，色差能拉开 60~100 级，但「绿明显压过红蓝」这条不变。
+   */
+  const spillOf = (p) => {
+    const i = p * 4;
+    const r = px[i];
+    const g2 = px[i + 1];
+    const b = px[i + 2];
+    if (keyKind === 'green') return g2 - Math.max(r, b);
+    if (keyKind === 'blue') return b - Math.max(r, g2);
+    if (keyKind === 'red') return r - Math.max(g2, b);
+    return 0;
+  };
+  const keyLike = (p) => spillOf(p) >= 26;
 
   /* ------------------------------------------- 亮度图 / 梯度图 / 底色距离 */
   const lumMap = new Float32Array(N);
@@ -134,10 +162,13 @@ export function cutout(img) {
   // 软边带宽：用 Otsu 的分界
   const KEY_T1 = Math.min(96, Math.max(16, otsu));
   const KEY_T0 = Math.max(4, KEY_T1 * 0.42);
-  // flood 要宽一点：灰底是有渐变的，远处的底也可能离采样色 30~40 级
-  const FLOOD_T = Math.min(110, Math.max(38, KEY_T1 * 1.9));
+  // flood 要宽一点：底幕有渐变、绿幕上还有偏暗的投影，都还是「同一族颜色」
+  const FLOOD_T = Math.min(chromatic ? 150 : 110, Math.max(38, KEY_T1 * (chromatic ? 2.2 : 1.9)));
   // 内孔要严一点：孔里看到的就是同一块底色，只会差几级
   const HOLE_T = Math.max(10, Math.min(26, KEY_T1 * 0.5));
+  // 有色幕布的软遮罩带：溢色量 <= LO 算主体，>= HI 算幕布
+  const SPILL_LO = 44;
+  const SPILL_HI = 64;
 
   /* ---------------------------------------- 1) 从四边 flood（梯度门控） */
   const bg = new Uint8Array(N);
@@ -145,8 +176,15 @@ export function cutout(img) {
   let sp = 0;
   const seed = (p) => {
     if (bg[p]) return;
-    if (grad[p] > EDGE_GRAD) return; // 碰到物体轮廓就停
-    if (distMap[p] > FLOOD_T) return;
+    if (chromatic) {
+      // 有色幕布：纯色键，只按色相判，不看梯度。
+      // 幕布上的投影是「暗一点的同色」→ 色相还在，照样扩散干净；
+      // 主体哪怕被染了点绿，色相也不够 → 一律不进，边界干净利落。
+      if (!keyLike(p)) return;
+    } else {
+      if (grad[p] > EDGE_GRAD) return; // 碰到物体轮廓就停
+      if (distMap[p] > FLOOD_T) return;
+    }
     bg[p] = 1;
     stack[sp++] = p;
   };
@@ -227,7 +265,7 @@ export function cutout(img) {
     const cand = new Uint8Array(N);
     for (let p = 0; p < N; p += 1) {
       if (bg[p] || ring[p] !== 255) continue;
-      if (distMap[p] <= HOLE_T) cand[p] = 1;
+      if (distMap[p] <= HOLE_T || keyLike(p)) cand[p] = 1;
     }
     const minHole = Math.max(64, objectPixels * 0.02);
     const seenHole = new Uint8Array(N);
@@ -286,19 +324,25 @@ export function cutout(img) {
   const keySat = Math.max(key[0], key[1], key[2]) - Math.min(key[0], key[1], key[2]);
   for (let p = 0; p < N; p += 1) {
     const i = p * 4;
-    if (bg[p] || hole[p]) {
+    // 有色幕布不走「flood 判背景」那条路：主体被染绿的侧光面 spill 也在 25~35，
+    // 用 flood 的硬边界会把它啃成锯齿。这里只认「里面的孔」，边界交给下面的软遮罩。
+    if ((chromatic ? hole[p] : bg[p] || hole[p])) {
       px[i + 3] = 0;
       continue;
     }
 
     const d = distMap[p];
-    // 离底色越远越不透明
-    let alpha = Math.min(1, Math.max(0, (KEY_T1 - d) / (KEY_T1 - KEY_T0)));
+    const spill = chromatic ? spillOf(p) : 0;
+    // 有色幕布：按「绿得有多明显」给软遮罩 —— 硬阈值会在 JPEG 噪声上抖成锯齿
+    // 其他底（白/灰）：离底色越远越不透明
+    let alpha = chromatic
+      ? Math.min(1, Math.max(0, (SPILL_HI - spill) / (SPILL_HI - SPILL_LO)))
+      : Math.min(1, Math.max(0, (KEY_T1 - d) / (KEY_T1 - KEY_T0)));
     // 有色差的物体（金、蓝、红）哪怕很亮也要留住，别被当成浅底
     const sat = Math.max(px[i], px[i + 1], px[i + 2]) - Math.min(px[i], px[i + 1], px[i + 2]);
-    if (sat > keySat + 18) alpha = Math.max(alpha, 0.92);
+    if (!chromatic && sat > keySat + 18) alpha = Math.max(alpha, 0.92);
 
-    if (floodOk) {
+    if (floodOk && !chromatic) {
       const rd = ring[p];
       if (rd === 255) {
         alpha = Math.max(alpha, 0.98); // 物体内部：实心
@@ -315,14 +359,43 @@ export function cutout(img) {
       px[i + 3] = 0;
       continue;
     }
-    if (alpha < 0.995) {
-      // 边缘是背景色混过的像素：按背景色反预乘，贴到别处才不留底边
+    if (alpha < 0.995 && !chromatic) {
+      // 中性底：边缘是底色混过的像素，按底色反预乘，贴到别处才不留底边。
+      // 绿幕不做这步 —— 被染绿的白像素减掉绿只会剩红蓝，一圈紫边；那交给下面的消色。
       const inv = 1 / alpha;
       const outA = 1 - alpha;
       px[i] = clamp8((px[i] - key[0] * outA) * inv);
       px[i + 1] = clamp8((px[i + 1] - key[1] * outA) * inv);
       px[i + 2] = clamp8((px[i + 2] - key[2] * outA) * inv);
     }
+
+    // 溢色抑制：幕布的光会反到主体上，不处理就是一圈绿边。
+    // 判据不看 alpha（不透明的地方也会被染），看「这个像素本身有多绿」——
+    // 绿得可疑就按嫌疑度削回去，正常颜色（红蓝占优、或中性白）完全不动。
+    if (chromatic) {
+      const c0 = px[i];
+      const c1 = px[i + 1];
+      const c2 = px[i + 2];
+      const edgeW = alpha < 0.95 ? 1 : 0.35; // 边缘本来就该削干净
+      let spill = Math.max(0, Math.min(255, c1 - Math.max(c0, c2)));
+      if (keyKind === 'green' && spill > 8) {
+        const wSpill = Math.max(edgeW, Math.min(0.88, (spill - 8) / 30));
+        px[i + 1] = clamp8(c1 - spill * wSpill);
+      } else if (keyKind === 'blue') {
+        spill = Math.max(0, Math.min(255, c2 - Math.max(c0, c1)));
+        if (spill > 8) {
+          const wSpill = Math.max(edgeW, Math.min(0.88, (spill - 8) / 30));
+          px[i + 2] = clamp8(c2 - spill * wSpill);
+        }
+      } else if (keyKind === 'red') {
+        spill = Math.max(0, Math.min(255, c0 - Math.max(c1, c2)));
+        if (spill > 8) {
+          const wSpill = Math.max(edgeW, Math.min(0.88, (spill - 8) / 30));
+          px[i] = clamp8(c0 - spill * wSpill);
+        }
+      }
+    }
+
     px[i + 3] = Math.round(alpha * 255);
   }
 
