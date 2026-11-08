@@ -25,7 +25,7 @@
 
       <div class="topbar-actions">
         <button class="btn btn-ghost" id="btnExample" type="button">填入示例</button>
-        <button class="btn btn-primary" id="btnMain" type="button">生成主体</button>
+        <button class="btn btn-primary" id="btnMain" type="button" title="写个物品名称，自动出描述+尺寸并直接生图">一键生成</button>
       </div>
     </header>
 
@@ -49,7 +49,7 @@
                 spellcheck="false"
                 aria-label="物品名称"
               />
-              <button class="btn btn-primary btn-tiny" id="btnQuick" type="button">一键生成</button>
+              <button class="btn btn-primary btn-tiny" id="btnQuick" type="button" title="按这个名称自动写描述、估尺寸，并直接生图">生成</button>
             </div>
             <p class="hint" id="quickHint">只写名称就行：AI 会自动写好主体描述（已含正俯视）和实物尺寸，然后直接开始生成。</p>
           </section>
@@ -69,7 +69,7 @@
           <section class="block">
             <div class="block-head">
               <h2>尺寸参照</h2>
-              <span class="sub">宽填短边、长填长边；量尺沿最长的一边</span>
+              <span class="sub">填俯视轮廓：宽=短边、长=长边，不是高度</span>
             </div>
 
             <div class="rows" id="refRows">
@@ -96,11 +96,14 @@
 
           <section class="block">
             <div class="block-head">
-              <h2 id="promptLabel">主体描述</h2>
+              <h2 id="promptLabel">主体描述<span class="tag" id="promptTag" hidden></span></h2>
               <span class="sub">Ctrl + Enter 执行</span>
             </div>
             <textarea class="input textarea" id="prompt" rows="3" spellcheck="false"></textarea>
-            <p class="hint" id="promptHint">模型会把主体画在纯白背景上；白底、单物体、俯拍，抠图最干净。</p>
+            <div class="prompt-actions" id="promptActions" hidden>
+              <button class="link" id="btnRedescribe" type="button">按名称重算描述和尺寸</button>
+            </div>
+            <p class="hint" id="promptHint">可以自己写；也可以在上面填个物品名称，由 AI 自动写好（正俯视约束会自动拼在后面）。</p>
           </section>
 
           <section class="block block-last">

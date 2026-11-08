@@ -26,6 +26,8 @@ const state = {
   scene: null,
   placement: { mode: 'auto', x: 0, y: 0 },
   quickBusy: false,
+  itemInfo: null,
+  promptEdited: false,
 };
 
 const view = {
@@ -107,12 +109,19 @@ function bind() {
     });
   }
 
-  $('prompt').addEventListener('input', updateCompose);
+  $('prompt').addEventListener('input', () => {
+    if (state.itemInfo && !state.promptEdited) {
+      state.promptEdited = true;
+      renderPromptTag();
+    }
+    updateCompose();
+  });
 
-  $('btnMain').addEventListener('click', generateSubject);
+  $('btnMain').addEventListener('click', mainAction);
   $('btnSubject').addEventListener('click', generateSubject);
 
   $('btnQuick').addEventListener('click', quickGenerate);
+  $('btnRedescribe').addEventListener('click', redescribe);
   $('itemName').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.isComposing) {
       e.preventDefault();
@@ -991,6 +1000,14 @@ function subjectPrompt() {
 
 /* ------------------------------------------------ 名称 → 描述 + 尺寸 */
 
+/** 顶部主按钮：有名称就一键到底，没名称但有描述就直接生图 */
+function mainAction() {
+  if ($('itemName').value.trim()) return quickGenerate();
+  if ($('prompt').value.trim().length >= 4) return generateSubject();
+  setStatus('先写个物品名称（或一句主体描述）。', 'error');
+  $('itemName').focus();
+}
+
 /** 一步到底：名称 → LLM 出描述+尺寸 → 填表单 → 直接开始生图 */
 async function quickGenerate() {
   const name = $('itemName').value.trim();
@@ -999,49 +1016,75 @@ async function quickGenerate() {
     $('itemName').focus();
     return;
   }
-  if (state.quickBusy) return;
+  const info = await runDescribe(name, { refresh: false });
+  if (!info) return;
+  setStatus(`「${name}」按 ${trim(info.w)} × ${trim(info.h)} cm 已开抽，可以继续输入下一个名称。`, 'ok');
+  // 一步到底：直接开生图（多请求互不阻塞，已有逻辑支持并发）
+  generateSubject();
+}
 
+/** 只重算描述和尺寸，不重新生图 */
+async function redescribe() {
+  const name = $('itemName').value.trim();
+  if (!name) {
+    setStatus('物品名称是空的，先在左上方写一个。', 'error');
+    $('itemName').focus();
+    return;
+  }
+  const info = await runDescribe(name, { refresh: true });
+  if (info) setStatus(`已按「${name}」重算：${trim(info.w)} × ${trim(info.h)} cm。点「生成主体」重新出图。`, 'ok');
+}
+
+/** 问后端（或缓存）拿描述+尺寸，填进表单，返回结果 */
+async function runDescribe(name, { refresh = false } = {}) {
+  if (state.quickBusy) return null;
   state.quickBusy = true;
+
   const panel = document.querySelector('.block-quick');
   panel?.classList.add('is-busy');
   $('btnQuick').disabled = true;
+  $('btnRedescribe').disabled = true;
   $('quickHint').classList.remove('is-warn');
-  $('quickHint').textContent = `正在为「${name}」估算描述和尺寸…`;
+  $('quickHint').textContent = refresh ? `正在重新估「${name}」的描述和尺寸…` : `正在为「${name}」估算描述和尺寸…`;
   setStatus(`正在让模型写「${name}」的描述和尺寸…`, '');
 
   const t0 = Date.now();
   try {
-    const info = await describeItem(name);
+    const info = await describeItem(name, refresh);
     applyItemInfo(info);
 
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
-    const src = info.source === 'llm' ? (info.cached ? `缓存 ${info.model || ''}` : `AI ${info.model || ''}`) : '本地粗估';
-    $('quickHint').innerHTML = `「<b>${escapeHtml(name)}</b>」→ <b>${trim(info.w)} × ${trim(info.h)} cm</b>、描述已填好（${escapeHtml(src.trim())}，${secs}s）。已开始生成主体。`;
+    const src =
+      info.source === 'llm'
+        ? info.cached
+          ? `缓存 ${info.model || ''}`.trim()
+          : `AI ${info.model || ''}`.trim()
+        : '本地粗估';
+    $('quickHint').innerHTML = `「<b>${escapeHtml(name)}</b>」→ <b>${trim(info.w)} × ${trim(info.h)} cm</b>、描述已填好（${escapeHtml(src)}，${secs}s）。`;
     if (info.warning) {
       $('quickHint').classList.add('is-warn');
       $('quickHint').innerHTML += `<br>${escapeHtml(info.warning)}`;
     }
-    setStatus(`「${name}」按 ${trim(info.w)} × ${trim(info.h)} cm 已开抽，可以继续输入下一个名称。`, 'ok');
-
-    // 一步到底：直接开生图（多请求互不阻塞，已有逻辑支持并发）
-    generateSubject();
+    return info;
   } catch (err) {
     $('quickHint').textContent = `没拿到「${name}」的描述：${err.message}`;
     $('quickHint').classList.add('is-warn');
     setStatus(err.message, 'error');
+    return null;
   } finally {
     state.quickBusy = false;
     panel?.classList.remove('is-busy');
     $('btnQuick').disabled = false;
+    $('btnRedescribe').disabled = false;
     $('itemName').select();
   }
 }
 
-async function describeItem(name) {
+async function describeItem(name, refresh = false) {
   const res = await fetch('/api/describe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(refresh ? { name, refresh: true } : { name }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `描述接口 HTTP ${res.status}`);
@@ -1051,18 +1094,41 @@ async function describeItem(name) {
 
 /** 把名称/描述/尺寸填进表单（尺寸参照里的「目标行」跟这是同一份数据） */
 function applyItemInfo(info) {
-  const name = String(info.name || $('itemName').value || '').trim()
-    || '新物体';
+  const name = String(info.name || $('itemName').value || '').trim() || '新物体';
   $('itemName').value = name;
   $('targetName').value = name;
   $('targetW').value = String(trim(Number(info.w) || 0));
   $('targetH').value = String(trim(Number(info.h) || Number(info.w) || 0));
   if (info.desc) $('prompt').value = String(info.desc).trim();
 
+  state.itemInfo = { name, w: Number(info.w) || 0, h: Number(info.h) || 0, source: info.source };
+  state.promptEdited = false;
+  renderPromptTag();
+  $('promptActions').hidden = false;
+
   buildRulerRefOptions();
   updateAll();
   invalidate();
   draw();
+}
+
+/** 描述标题旁的来源小标：AI 自动 / 本地粗估 / 已手改 */
+function renderPromptTag() {
+  const tag = $('promptTag');
+  const info = state.itemInfo;
+  if (!info) {
+    tag.hidden = true;
+    return;
+  }
+  tag.hidden = false;
+  const dims = `${trim(info.w)}×${trim(info.h)} cm`;
+  if (state.promptEdited) {
+    tag.textContent = `已手改 · ${dims}`;
+    tag.classList.remove('is-ai');
+  } else {
+    tag.textContent = `${info.source === 'llm' ? 'AI 自动' : '本地粗估'} · ${dims}`;
+    tag.classList.toggle('is-ai', info.source === 'llm');
+  }
 }
 
 function escapeHtml(text) {
@@ -1418,7 +1484,7 @@ function updateBoardNote() {
   if (!pxPerCm()) {
     note.textContent = `① 在底图上沿${rulerRef().name}最长的一边拖一条线，把厘米换成像素`;
   } else if (!view.phone) {
-    note.textContent = `② 写个物品名称按回车（或一句描述）——白底会自动抠图，并按 ${trim(readTarget().w)} cm 放进空位`;
+    note.textContent = `② 写个物品名称按回车（或一句描述），自动出描述和尺寸后直接生图；抠图完按 ${trim(readTarget().w)} cm 放进空位`;
   } else if (view.eraseOn) {
     note.textContent = '在压住它的东西上刷：露回底图就是遮挡（数据线、纸巾包边、桌角）';
   } else {
@@ -1613,7 +1679,11 @@ function applyExample() {
     invalidate();
   }
   $('prompt').value = DEFAULT_SUBJECT;
-  $('itemName').value = DEFAULTS.target.name;
+  $('itemName').value = '';
+  state.itemInfo = null;
+  state.promptEdited = false;
+  renderPromptTag();
+  $('promptActions').hidden = true;
   buildRulerRefOptions();
   updateAll();
   draw();
