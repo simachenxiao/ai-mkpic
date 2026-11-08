@@ -1,0 +1,5 @@
+output/
+server.log
+.env
+.playwright-cli/
+backup/

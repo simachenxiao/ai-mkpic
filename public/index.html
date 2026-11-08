@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>物品舱 · 布景</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231e46c9'/%3E%3Cpath d='M18 26h28v18H18z' fill='none' stroke='white' stroke-width='3'/%3E%3Cpath d='M18 26l6-8h16l6 8' fill='none' stroke='white' stroke-width='3'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <svg class="mark" viewBox="0 0 22 22" aria-hidden="true">
+          <path d="M3.2 8.4h15.6v10.4H3.2z" />
+          <path d="M3.2 8.4 6.4 4h9.2l3.2 4.4" />
+          <path d="M8.4 13.4h5.2" />
+        </svg>
+        <span class="brand-name">物品舱<span class="brand-dot">·</span>布景</span>
+        <span class="brand-scope" id="scope">base.jpg</span>
+      </div>
+
+      <div class="topbar-meta">
+        <span class="dot" id="keyDot"></span><span id="keyState">检查配置…</span>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="btn btn-ghost" id="btnExample" type="button">填入示例</button>
+        <button class="btn btn-primary" id="btnMain" type="button">生成主体</button>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <p class="finding" id="finding">—</p>
+
+      <div class="layout">
+        <!-- ---------------------------------------------------- 左：参数 -->
+        <aside class="panel" aria-label="生成参数">
+          <section class="block">
+            <div class="block-head">
+              <h2>参考图</h2>
+              <button class="link" id="btnResetRef" type="button" hidden>恢复 base.jpg</button>
+            </div>
+            <label class="refdrop" id="refDrop">
+              <img id="refThumb" src="/base.jpg" alt="参考图" />
+              <input type="file" id="refFile" accept="image/png,image/jpeg,image/webp" hidden />
+            </label>
+            <p class="hint" id="refMeta">参照物：纸巾包、充电器。点一下可以换成你自己拍的桌面。</p>
+          </section>
+
+          <section class="block">
+            <div class="block-head">
+              <h2>尺寸参照</h2>
+              <span class="sub">宽填短边、长填长边；量尺沿最长的一边</span>
+            </div>
+
+            <div class="rows" id="refRows">
+              <div class="row" data-role="ref">
+                <input class="input name" value="纸巾包" aria-label="参照物名称" />
+                <input class="input num" value="3.5" inputmode="decimal" aria-label="参照物宽度 cm（短边）" /><span class="unit">cm 宽</span>
+                <input class="input num" value="5.5" inputmode="decimal" aria-label="参照物长度 cm（长边）" /><span class="unit">cm 长</span>
+              </div>
+              <div class="row" data-role="ref">
+                <input class="input name" value="充电器" aria-label="参照物名称" />
+                <input class="input num" value="4.5" inputmode="decimal" aria-label="参照物宽度 cm（短边）" /><span class="unit">cm 宽</span>
+                <input class="input num" value="5" inputmode="decimal" aria-label="参照物长度 cm（长边）" /><span class="unit">cm 长</span>
+              </div>
+            </div>
+
+            <div class="row row-target" id="targetRow">
+              <input class="input name" id="targetName" value="手机" aria-label="要添加的物体名称" />
+              <input class="input num" id="targetW" value="7.2" inputmode="decimal" aria-label="物体宽度 cm（短边）" /><span class="unit">cm 宽</span>
+              <input class="input num" id="targetH" value="15.2" inputmode="decimal" aria-label="物体长度 cm（长边）" /><span class="unit">cm 长</span>
+            </div>
+
+            <div class="ruler" id="ruler" aria-hidden="true"></div>
+          </section>
+
+          <section class="block">
+            <div class="block-head">
+              <h2 id="promptLabel">主体描述</h2>
+              <span class="sub">Ctrl + Enter 执行</span>
+            </div>
+            <textarea class="input textarea" id="prompt" rows="3" spellcheck="false"></textarea>
+            <p class="hint" id="promptHint">模型会把主体画在纯白背景上；白底、单物体、俯拍，抠图最干净。</p>
+          </section>
+
+          <section class="block block-last">
+            <div class="block-head"><h2>模型与画幅</h2></div>
+            <label class="field">
+              <span class="field-label">模型</span>
+              <select class="input select" id="model"></select>
+            </label>
+            <p class="hint" id="modelNote"></p>
+            <label class="field">
+              <span class="field-label">画幅</span>
+              <select class="input select" id="size"></select>
+            </label>
+
+            <details class="compose">
+              <summary>实际发送的提示词</summary>
+              <pre id="composeText"></pre>
+            </details>
+          </section>
+        </aside>
+
+        <!-- ---------------------------------------------------- 右：画布 -->
+        <section class="stage" aria-label="画布">
+          <div class="stage-head">
+            <h1 id="stageTitle">实拍合成 · 等待标定</h1>
+            <div class="stage-tools">
+              <a class="btn btn-tiny" id="btnSave" hidden download>下载</a>
+            </div>
+          </div>
+
+          <div class="board" id="board">
+            <canvas id="canvas" aria-label="底图"></canvas>
+            <div class="badge" id="stageBadge">参考图</div>
+            <div class="board-note" id="boardNote"></div>
+          </div>
+
+          <div class="toolstrip" id="toolstrip">
+            <div class="tool">
+              <span class="tool-step">1</span>
+              <select class="input input-mini" id="rulerRef" aria-label="选哪个参照物来标定"></select>
+              <button class="btn btn-tiny" id="btnRemeasure" type="button">重标</button>
+              <button class="link" id="btnUseProfile" type="button" hidden>用回档案</button>
+              <span class="tool-val" id="rulerVal">未标定</span>
+            </div>
+
+            <div class="tool">
+              <span class="tool-step">2</span>
+              <button class="btn btn-primary btn-tiny" id="btnSubject" type="button">生成主体</button>
+              <img class="subject-thumb" id="subjectThumb" alt="抠出的主体" hidden />
+              <span class="tool-val" id="subjectVal">白底主体会自动抠图</span>
+            </div>
+
+            <div class="tool">
+              <span class="tool-step">3</span>
+              <label class="slider">
+                旋转
+                <input type="range" id="rot" min="-60" max="60" step="1" value="0" />
+                <span class="tool-val" id="rotVal">0°</span>
+              </label>
+              <label class="slider">
+                微调
+                <input type="range" id="sizeMul" min="80" max="125" step="1" value="100" />
+                <span class="tool-val" id="sizeVal">100%</span>
+              </label>
+              <label class="slider">
+                压缩
+                <input type="range" id="squash" min="82" max="106" step="1" value="100" />
+                <span class="tool-val" id="squashVal">100%</span>
+              </label>
+            </div>
+
+            <div class="tool">
+              <span class="tool-step">4</span>
+              <div class="posmode">
+                <button class="btn btn-tiny is-on" id="btnPosAuto" type="button">自动</button>
+                <button class="btn btn-tiny" id="btnPosFixed" type="button">指定</button>
+              </div>
+              <label class="slider">X <input class="input input-num" id="posX" type="number" min="0" step="10" /> px</label>
+              <label class="slider">Y <input class="input input-num" id="posY" type="number" min="0" step="10" /> px</label>
+              <button class="btn btn-tiny" id="btnSavePlacement" type="button">存为默认</button>
+            </div>
+
+            <div class="tool">
+              <span class="tool-step">5</span>
+              <button class="btn btn-tiny" id="btnErase" type="button" disabled>橡皮</button>
+              <label class="slider">
+                大小
+                <input type="range" id="brush" min="12" max="140" step="2" value="46" />
+                <span class="tool-val" id="brushVal">46 px</span>
+              </label>
+              <button class="btn btn-tiny" id="btnEraseClear" type="button">清掉</button>
+              <span class="tool-val tool-hint">刷过的地方露回底图：数据线、纸巾包边就能压住新物体</span>
+            </div>
+
+            <div class="tool">
+              <span class="tool-step">6</span>
+              <button class="btn btn-tiny" id="btnExport" type="button" disabled title="生成时会自动存一张；调完位置想再存一张就点这里">再存一张</button>
+              <span class="tool-val" id="saveVal"></span>
+            </div>
+          </div>
+
+          <div class="jobs" id="jobs" hidden></div>
+          <div class="candidates" id="candidates" hidden></div>
+
+          <div class="genresult" id="genResult" hidden>
+            <button class="genresult-thumb" id="genThumbBtn" type="button" title="点开看原图">
+              <img id="genThumb" alt="生成的主体" />
+            </button>
+            <div class="genresult-text">
+              <b id="genTitle">白底主体</b>
+              <span id="genMeta"></span>
+            </div>
+            <button class="btn btn-tiny" id="genOpen" type="button">看原图</button>
+            <a class="btn btn-tiny" id="genDownload" href="#" target="_blank" rel="noreferrer" download>下载</a>
+            <button class="btn btn-tiny" id="genReveal" type="button">在文件夹里看</button>
+          </div>
+
+          <div class="status" id="status" role="status"></div>
+
+          <div class="history-head">
+            <h2>最近生成</h2>
+            <span class="sub" id="historyCount"></span>
+          </div>
+          <div class="history" id="history"></div>
+
+          <footer class="foot">
+            生成完会自动存一张到 <code id="outDir">output/</code>（文件名 = 物品名 + 时间），关掉服务也不会丢。底图本身不会被改动。
+            <button class="link" id="btnReveal" type="button">打开 output 文件夹</button>
+          </footer>
+        </section>
+      </div>
+    </main>
+
+    <div class="lightbox" id="lightbox" hidden>
+      <button class="lightbox-close" id="lightboxClose" type="button" aria-label="关闭">×</button>
+      <figure>
+        <img id="lightboxImg" alt="预览" />
+        <figcaption id="lightboxCap"></figcaption>
+      </figure>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
