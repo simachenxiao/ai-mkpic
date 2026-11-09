@@ -1,0 +1,462 @@
+{
+ "source": "物品名称分类汇总_最新.xlsx",
+ "total": 114,
+ "items": [
+  {
+   "name": "手机",
+   "category": "手机等通讯工具"
+  },
+  {
+   "name": "现金",
+   "category": "现金、贵金属等贵重物品"
+  },
+  {
+   "name": "皮带",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "药品",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "香烟",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "发饰",
+   "category": "佩戴的首饰饰物"
+  },
+  {
+   "name": "项链",
+   "category": "佩戴的首饰饰物"
+  },
+  {
+   "name": "钥匙",
+   "category": "钥匙"
+  },
+  {
+   "name": "工具五金",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "食品饮料",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "眼镜",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "文书证明",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "洗漱用品",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "首饰饰物",
+   "category": "佩戴的首饰饰物"
+  },
+  {
+   "name": "戒指",
+   "category": "佩戴的首饰饰物"
+  },
+  {
+   "name": "耳饰",
+   "category": "佩戴的首饰饰物"
+  },
+  {
+   "name": "身份证",
+   "category": "身份证件"
+  },
+  {
+   "name": "绳带",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "手链脚链",
+   "category": "佩戴的首饰饰物"
+  },
+  {
+   "name": "衣物",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "票据发票",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "杂物",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "手表",
+   "category": "手表等穿戴设备"
+  },
+  {
+   "name": "纸张",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "卡片",
+   "category": "银行卡等卡证"
+  },
+  {
+   "name": "包袋",
+   "category": "随身箱包"
+  },
+  {
+   "name": "鞋",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "裤子",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "车钥匙",
+   "category": "钥匙"
+  },
+  {
+   "name": "文具书本",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "耳机",
+   "category": "手机等通讯工具"
+  },
+  {
+   "name": "帽",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "手镯",
+   "category": "佩戴的首饰饰物"
+  },
+  {
+   "name": "充电器",
+   "category": "手机等通讯工具"
+  },
+  {
+   "name": "其他物品",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "驾驶证",
+   "category": "身份证件"
+  },
+  {
+   "name": "上衣",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "工作证件",
+   "category": "身份证件"
+  },
+  {
+   "name": "打火机",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "手串",
+   "category": "佩戴的首饰饰物"
+  },
+  {
+   "name": "钱包",
+   "category": "钱包"
+  },
+  {
+   "name": "手套",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "背包",
+   "category": "随身箱包"
+  },
+  {
+   "name": "银行卡",
+   "category": "银行卡等卡证"
+  },
+  {
+   "name": "电子设备",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "充电宝",
+   "category": "手机等通讯工具"
+  },
+  {
+   "name": "硬币",
+   "category": "现金、贵金属等贵重物品"
+  },
+  {
+   "name": "照片",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "袜子",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "黄金",
+   "category": "现金、贵金属等贵重物品"
+  },
+  {
+   "name": "贵重饰品",
+   "category": "现金、贵金属等贵重物品"
+  },
+  {
+   "name": "其他证件",
+   "category": "身份证件"
+  },
+  {
+   "name": "手提袋",
+   "category": "随身箱包"
+  },
+  {
+   "name": "计生用品",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "随身WiFi",
+   "category": "手机等通讯工具"
+  },
+  {
+   "name": "外币",
+   "category": "现金、贵金属等贵重物品"
+  },
+  {
+   "name": "内衣裤",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "证件",
+   "category": "身份证件"
+  },
+  {
+   "name": "智能手环",
+   "category": "手表等穿戴设备"
+  },
+  {
+   "name": "腰带绳",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "布料杂料",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "口罩",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "鞋带",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "单肩包",
+   "category": "随身箱包"
+  },
+  {
+   "name": "眼镜配件",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "消费会员卡",
+   "category": "银行卡等卡证"
+  },
+  {
+   "name": "假发",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "塑料袋",
+   "category": "随身箱包"
+  },
+  {
+   "name": "收纳密封袋",
+   "category": "随身箱包"
+  },
+  {
+   "name": "券卡",
+   "category": "银行卡等卡证"
+  },
+  {
+   "name": "护照",
+   "category": "身份证件"
+  },
+  {
+   "name": "社保医保卡",
+   "category": "银行卡等卡证"
+  },
+  {
+   "name": "纽扣饰品配件",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "军人证件",
+   "category": "身份证件"
+  },
+  {
+   "name": "门禁卡",
+   "category": "银行卡等卡证"
+  },
+  {
+   "name": "交通卡",
+   "category": "银行卡等卡证"
+  },
+  {
+   "name": "丝巾围巾",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "无物品",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "雨具",
+   "category": "其他随身物品"
+  },
+  {
+   "name": "加油ETC卡",
+   "category": "银行卡等卡证"
+  },
+  {
+   "name": "医疗就诊卡",
+   "category": "银行卡等卡证"
+  },
+  {
+   "name": "手提包",
+   "category": "随身箱包"
+  },
+  {
+   "name": "旅行包",
+   "category": "随身箱包"
+  },
+  {
+   "name": "快递包裹",
+   "category": "随身箱包"
+  },
+  {
+   "name": "物证袋",
+   "category": "随身箱包"
+  },
+  {
+   "name": "白银",
+   "category": "现金、贵金属等贵重物品"
+  },
+  {
+   "name": "布袋",
+   "category": "随身箱包"
+  },
+  {
+   "name": "行李箱",
+   "category": "随身箱包"
+  },
+  {
+   "name": "手机卡",
+   "category": "手机等通讯工具"
+  },
+  {
+   "name": "平板电脑",
+   "category": "笔记本或平板电脑"
+  },
+  {
+   "name": "笔记本电脑",
+   "category": "笔记本或平板电脑"
+  },
+  {
+   "name": "出生证明",
+   "category": "身份证件"
+  },
+  {
+   "name": "户口簿",
+   "category": "身份证件"
+  },
+  {
+   "name": "美瞳",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "隐形眼镜",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "汽车",
+   "category": "到案时使用的个人交通工具"
+  },
+  {
+   "name": "手机配件",
+   "category": "手机等通讯工具"
+  },
+  {
+   "name": "居住证",
+   "category": "身份证件"
+  },
+  {
+   "name": "校园卡",
+   "category": "银行卡等卡证"
+  },
+  {
+   "name": "电话手表",
+   "category": "手表等穿戴设备"
+  },
+  {
+   "name": "太阳镜墨镜",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "老花镜",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "化妆包",
+   "category": "随身箱包"
+  },
+  {
+   "name": "箱包配件",
+   "category": "随身箱包"
+  },
+  {
+   "name": "编织袋",
+   "category": "随身箱包"
+  },
+  {
+   "name": "腰包",
+   "category": "随身箱包"
+  },
+  {
+   "name": "电动车",
+   "category": "到案时使用的个人交通工具"
+  },
+  {
+   "name": "对讲机",
+   "category": "手机等通讯工具"
+  },
+  {
+   "name": "寻呼机",
+   "category": "手机等通讯工具"
+  },
+  {
+   "name": "学生证",
+   "category": "身份证件"
+  },
+  {
+   "name": "假币",
+   "category": "现金、贵金属等贵重物品"
+  },
+  {
+   "name": "护目镜",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "眼罩",
+   "category": "服装鞋帽及穿戴品"
+  },
+  {
+   "name": "自行车",
+   "category": "到案时使用的个人交通工具"
+  }
+ ]
+}

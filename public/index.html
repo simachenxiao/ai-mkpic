@@ -24,12 +24,13 @@
       </div>
 
       <div class="topbar-actions">
+        <button class="btn btn-ghost" id="btnBatch" type="button">批量</button>
         <button class="btn btn-ghost" id="btnExample" type="button">填入示例</button>
         <button class="btn btn-primary" id="btnMain" type="button" title="写个物品名称，自动出描述+尺寸并直接生图">一键生成</button>
       </div>
     </header>
 
-    <main class="wrap">
+    <main class="wrap" id="workspace">
       <p class="finding" id="finding">—</p>
 
       <div class="layout">
@@ -241,6 +242,8 @@
         </section>
       </div>
     </main>
+    <section class="wrap batchpanel" id="batchPanel" hidden></section>
+
 
     <div class="lightbox" id="lightbox" hidden>
       <button class="lightbox-close" id="lightboxClose" type="button" aria-label="关闭">×</button>

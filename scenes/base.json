@@ -4,62 +4,55 @@
   "height": 1080,
   "calibration": {
     "index": 0,
-    "pixels": 123,
-    "note": "纸巾包长边在底图上约 123 px"
+    "pixels": 128,
+    "note": "纸巾包（右下角）长边在底图上约 128 px"
   },
-  "planeDeg": -16,
-  "squash": 0.96,
+  "planeDeg": -18.0,
+  "squash": 0.97,
   "lightDeg": 135,
   "occupied": [
     {
-      "x": 992,
-      "y": 412,
-      "w": 145,
-      "h": 155,
-      "label": "纸巾包"
-    },
-    {
-      "x": 690,
-      "y": 585,
-      "w": 115,
-      "h": 120,
-      "label": "充电器"
+      "x": 1180,
+      "y": 603,
+      "w": 159,
+      "h": 145
     }
   ],
   "slots": [
     {
-      "x": 1288,
-      "y": 548,
-      "r": 168,
-      "label": "纸巾包右侧"
+      "x": 1054,
+      "y": 634,
+      "r": 173,
+      "label": "纸巾包左侧"
     },
     {
-      "x": 1006,
-      "y": 664,
-      "r": 132,
-      "label": "充电器与纸巾包之间"
+      "x": 1179,
+      "y": 366,
+      "r": 173,
+      "label": "纸巾包上方"
     },
     {
-      "x": 1220,
-      "y": 792,
-      "r": 150,
-      "label": "纸巾包下方"
+      "x": 845,
+      "y": 572,
+      "r": 173,
+      "label": "桌面中央"
     },
     {
-      "x": 470,
-      "y": 470,
-      "r": 130,
-      "label": "桌面左侧"
+      "x": 538,
+      "y": 486,
+      "r": 173,
+      "label": "桌面左中"
     }
   ],
   "placement": {
     "mode": "auto",
-    "x": 1288,
-    "y": 548
+    "x": 1054,
+    "y": 634
   },
+  "refCm": 5.5,
   "surface": {
     "cols": 96,
     "rows": 54,
-    "mask": "AAAAAAAAAAAAAAAAAAAAAAAAA4AAAAAAAAAAAAAAD8AAAAAAAAAAAAAAf+AAAAAAAAAAAAAB/+AAAAAAAAAAAAAH//AAAAAAAAAAAAAf//AAAAAAAAAAAAB///AAAAAAAAAAAAP///gAAAAAAAAAAA////gAAAAAAAAAAD////wAAAAAAAAAAP////wAAAAAAAAAA/////4AAAAAAAAAD/////4AAAAAAAAAP/////8AAAAAAAAA//////8AAAAAAAAD//////8AAAAAAAAf//////+AAAAAAAA///////+AAAAAAAD////////AAAAAAAP////////AAAAAAA/////////gAAAAAEH////////gAAAAAQH////////wAAAABAD////////wAAAAAAD////////4AAAAAAB////////4AAAAAAB////////8AAAAAAA////////8AAAAAAA////////8AAAAAAA////////+AAAAAAAf///////+AAAAAAAf////////AAAAAAAP////////AAAAAAAP////////gAAAAAAH////////gAAAAAAH////////AAAAAAAD///////8AAAAAAAD///////wAAAAAAAD//////+AAAAAAAAB//////4AAAAAAAAB//////gAAAAAAAAA/////+AAAAAAAAAA/////4AAAAAAAAAAf////AAAAAAAAAAAf///8AAAAAAAAAAAP///wAAAAAAAAAAAP///AAAAAAAAAAAAH//8AAAAAAAAAAAAH//gAAAAAAAAAAAAD/+AAAAAAAAAAAAAD/4AAAAAAAAAAAAAB/AAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "mask": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD4AAAAAAAAAAAAAAP8AAAAAAAAAAAAAB/8AAAAAAAAAAAAAH/8AAAAAAAAAAAAAf/+AAAAAAAAAAAAD//+AAAAAAAAAAAAP///AAAAAAAAAAAA////AAAAAAAAAAAD////gAAAAAAAAAAP////gAAAAAAAAAB/////wAAAAAAAAAH/////wAAAAAAAAAf/////wAAAAAAAAB//////4AAAAAAAAH//////4AAAAAAAAf//////8AAAAAAAB///////8AAAAAAAD///////+AAAAAAAf///////+AAAAAAAP////////AAAAAAAP////////AAAAAAAP////////AAAAAAAH////////gAAAAAAH////////gAAAAAADD///////wAAAAAACBH//////wAAAAAAAAH//////4AAAAAAAAD//////4AAAAAAAAB//////8AAAAAAAAB//////8AAAAAAAAAP/////+AAAAAAAAAP/////+AAAAAAAAAP/////+AAAAAAAAAP//////AAAAAAAAAP//////AAAAAAAAAP//////AAAAAAAAAP//////AAAAAAAAAB/////8AAAAAAAAAA////4EAAAAAAAAAA////gEAAAAAAAAAAf//+AGAAAAAAAAAAB//wACAAAAAAAAAAA//AACAAAAAAAAAAAH8AABAAAAAAAAAAABwAABAAAAAAAAAAAAAAABgAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
   }
 }

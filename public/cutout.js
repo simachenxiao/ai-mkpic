@@ -178,23 +178,26 @@ export function cutout(img) {
   const keyLike = (p) => spillOf(p) >= 26;
 
   /* --------------------------- 幕布有没有铺满画面（模型有时会画成一张「卡片」） */
-  let hit = 0;
-  let all = 0;
   const inset = Math.max(2, Math.round(Math.min(w, h) * 0.03));
-  const testPx = (x, y) => {
-    const p = y * w + x;
-    all += 1;
-    if (chromatic ? spillOf(p) >= 26 : keyDistance(px, p * 4, key) < 55) hit += 1;
+  const edgeStats = (pick) => {
+    let hit = 0;
+    let total = 0;
+    for (let i = 0; i < 240; i += 1) {
+      const [x, y] = pick(i);
+      const p = y * w + x;
+      total += 1;
+      if (chromatic ? spillOf(p) >= 26 : keyDistance(px, p * 4, key) < 55) hit += 1;
+    }
+    return total ? hit / total : 0;
   };
-  for (let x = 0; x < w; x += 4) {
-    testPx(x, inset);
-    testPx(x, h - 1 - inset);
-  }
-  for (let y = 0; y < h; y += 4) {
-    testPx(inset, y);
-    testPx(w - 1 - inset, y);
-  }
-  const backdropOk = all > 0 && hit / all > 0.8;
+  // 四条边分别算，取中位数：模型的角标/水印只污染一条边，不该整张判成「幕布没铺满」
+  const edges = [
+    edgeStats((i) => [Math.round((i / 239) * (w - 1)), inset]),
+    edgeStats((i) => [Math.round((i / 239) * (w - 1)), h - 1 - inset]),
+    edgeStats((i) => [inset, Math.round((i / 239) * (h - 1))]),
+    edgeStats((i) => [w - 1 - inset, Math.round((i / 239) * (h - 1))]),
+  ].sort((a, b) => a - b);
+  const backdropOk = (edges[1] + edges[2]) / 2 > 0.7;
 
   /* ------------------------------------------- 亮度图 / 梯度图 / 底色距离 */
   const lumMap = new Float32Array(N);

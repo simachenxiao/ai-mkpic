@@ -163,6 +163,13 @@ const DESCRIBE_SYSTEM = `你是产品布景师。用户给你一个物品名称�
 - desc：中文，30~60 字，只描述物品外观本身——颜色、材质、光泽、形态、关键细节（按钮/接口/指示灯的位置）。
 - desc 里严禁出现：俯视、俯拍、镜头、角度、背景、白色背景、构图、摆放、画布、光线、拍摄、尺寸、价格、品牌口号。
 
+形态规则（重要）：
+- 长条形、线性、软质的东西一律描述成**卷起来 / 盘起来 / 折叠起来**的形态，不要描述成摊平的长条：
+  皮带、腰带、围巾、领带、丝巾、数据线、充电线、项链、绳子、跳绳、绳带、链条、发带、鞋带、毛巾、衣服（可叠）。
+- 例：皮带 → 「一条深棕色皮质皮带，卷成一卷，金属扣头露在侧面」；围巾 → 「一条米色羊毛围巾，叠成方块」。
+- 卷/叠之后的形态要能一眼看出是什么，扣头、吊坠、接口这些特征要露出来。
+- **尺寸一律按卷好/叠好之后的俯视外接矩形给**，不是展开长度！
+
 尺寸规则（重要）：
 - w / h 是「物品平放在桌面上、从上往下看所占矩形」的短边与长边，单位厘米，保留一位小数；
 - 不是高度，也不是厚度。杯子/圆柱取直径，不要取高；手机/充电盒取平放时的宽与长（厚度不算）；
@@ -170,7 +177,9 @@ const DESCRIBE_SYSTEM = `你是产品布景师。用户给你一个物品名称�
 
 示例：
 - 「马克杯」→ {"desc":"一只白色亮面陶瓷马克杯，杯身圆柱形略微上宽下窄，杯口圆整，右侧一体式弧形手柄","w":8,"h":11}（11 是带手柄的总长）
-- 「AirPods Pro 充电盒」→ {"desc":"白色亮面塑料充电盒，圆角矩形扁平机身，顶部翻盖接缝，正面小状态指示灯，底部充电口","w":4.5,"h":6.1}`;
+- 「AirPods Pro 充电盒」→ {"desc":"白色亮面塑料充电盒，圆角矩形扁平机身，顶部翻盖接缝，正面小状态指示灯，底部充电口","w":4.5,"h":6.1}
+- 「皮带」→ {"desc":"一条深棕色皮质皮带，卷成一卷平放着，侧面露出银色金属扣头","w":11,"h":11}（**不是 4×120**）
+- 「围巾」→ {"desc":"一条米色羊毛围巾，叠成方块平放着，边缘有细流苏","w":22,"h":26}`;
 
 /** 常见物品的兜底尺寸，LLM 不可用时也能给出可用值 */
 const LOCAL_ITEMS = [
@@ -191,6 +200,10 @@ const LOCAL_ITEMS = [
   { test: /戒指|指环/i, w: 1.8, h: 1.8, desc: '一枚金色金属戒指，环身圆润、表面抛光，戒圈中间镂空' },
   { test: /项链|吊坠/i, w: 9, h: 13, desc: '一条细银链项链，链条自然盘成一个水滴形环，带一枚小吊坠' },
   { test: /耳环|耳钉|耳坠/i, w: 1.2, h: 2.4, desc: '一对金色小耳钉，圆形亮面，边缘抛光' },
+  { test: /皮带|腰带|皮带扣/i, w: 11, h: 11, desc: '一条深棕色皮质皮带，卷成一卷平放着，侧面露出银色金属扣头' },
+  { test: /围巾|丝巾|披肩/i, w: 22, h: 26, desc: '一条米色羊毛围巾，叠成方块平放着，边缘有细流苏' },
+  { test: /领带/i, w: 9, h: 12, desc: '一条深蓝色丝绸领带，卷成一卷平放着' },
+  { test: /毛巾/i, w: 18, h: 24, desc: '一条浅灰色纯棉毛巾，叠成方块平放着' },
   { test: /衣服|上衣|T恤|t恤|卫衣|衬衫|外套|毛衣|针织|裙子|裤子/i, w: 26, h: 32, desc: '一件叠平的深灰色棉质上衣，袖口与下摆自然收拢，布面有细密织物纹理，颜色深灰偏冷' },
   { test: /包|背包|手提包|挎包|钱包?夹/i, w: 22, h: 28, desc: '一只深棕色皮质手提包，包身挺括，正面金属扣件，提手立起平放' },
   { test: /鞋|运动鞋|球鞋|皮鞋/i, w: 9, h: 26, desc: '一只黑色皮质运动鞋，鞋头圆润，鞋带整齐，侧边有白色条纹' },
@@ -218,7 +231,7 @@ function localEstimate(name) {
   };
 }
 
-const ITEM_PROMPT_VERSION = 2; // 提示词改了就加一，缓存自动失效
+const ITEM_PROMPT_VERSION = 3; // 提示词改了就加一，缓存自动失效
 
 async function handleDescribe(req, res) {
   const body = await readJson(req, 8 * 1024);
@@ -508,19 +521,32 @@ async function handleGenerate(req, res) {
     let attempts = 0;
     let upstreamError = null;
 
-    // 上游偶发回空图（多半是转发超时），再试一次通常就回来了
+    // 上游会犯两种病：① 偶发回空图（转发超时）② 直接连不上（网络/CF 抖动）。
+    // 两种都退避重试，批量跑的时候这点很有用。
     while (attempts < MAX_ATTEMPTS && !buffer) {
       attempts += 1;
-      const upstream = await fetch(`${BASE_URL}/images/generations`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${API_KEY}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
+      let upstream = null;
+      try {
+        upstream = await fetch(`${BASE_URL}/images/generations`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${API_KEY}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+      } catch (err) {
+        if (err?.name === 'AbortError') throw err;
+        upstreamError = `连不上上游（${err?.cause?.code || err?.message || 'network'}）`;
+        console.log(`[generate] 第 ${attempts} 次网络失败：${upstreamError}`);
+        if (attempts < MAX_ATTEMPTS) {
+          const wait = 1500 * attempts * attempts; // 1.5s / 6s / 13.5s
+          await new Promise((r) => setTimeout(r, wait));
+        }
+        continue;
+      }
 
       const text = await upstream.text();
       const took = Date.now() - t0;
@@ -533,6 +559,13 @@ async function handleGenerate(req, res) {
 
       if (!upstream.ok) {
         const msg = data?.error?.message || data?.message || text.slice(0, 400) || `上游 HTTP ${upstream.status}`;
+        // 5xx / 429 还有救，退避再试；4xx 是请求本身有问题，直接报
+        if ((upstream.status >= 500 || upstream.status === 429) && attempts < MAX_ATTEMPTS) {
+          upstreamError = msg;
+          console.log(`[generate] 第 ${attempts} 次 HTTP ${upstream.status}，退避重试`);
+          await new Promise((r) => setTimeout(r, 1500 * attempts * attempts));
+          continue;
+        }
         return json(res, 502, { error: `上游拒绝了这次请求：${msg}` });
       }
       if (!data) {

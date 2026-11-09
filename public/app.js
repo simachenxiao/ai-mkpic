@@ -1,6 +1,16 @@
 const $ = (id) => document.getElementById(id);
 
 import { cutout } from '/cutout.js';
+import { closeBatch, openBatch } from '/batch.js';
+import {
+  autoSurfaceMask as coreAutoSurface,
+  buildSubjectPrompt,
+  clampIntoCanvas as coreClampIntoCanvas,
+  decodeSurface,
+  findFittingCenter,
+  sizeForCut,
+  surfaceOk,
+} from '/scene-core.js';
 
 const DEFAULTS = {
   refs: [
@@ -217,6 +227,21 @@ function bind() {
   $('lightboxClose').addEventListener('click', closeLightbox);
   $('lightbox').addEventListener('click', (e) => {
     if (e.target === $('lightbox')) closeLightbox();
+  });
+  $('btnBatch').addEventListener('click', async () => {
+    const panel = $('batchPanel');
+    const workspace = $('workspace');
+    const opening = panel.hidden;
+    if (opening) {
+      $('btnBatch').textContent = '返回单张';
+      await openBatch(panel);
+      workspace.hidden = true;
+      window.scrollTo(0, 0);
+    } else {
+      closeBatch();
+      workspace.hidden = false;
+      $('btnBatch').textContent = '批量';
+    }
   });
   $('btnExample').addEventListener('click', applyExample);
   $('btnResetRef').addEventListener('click', () => loadBase(state.config.defaultBaseImage));
@@ -437,223 +462,31 @@ let surfaceCache = null;
 /** scenes/*.json 里的 surface：96×54 的桌面掩膜，摆大件时别让它们挂到桌沿外面 */
 function surfaceMask() {
   const s = state.scene?.surface;
-  if (!s || !s.mask || !s.cols || !s.rows) return autoSurfaceMask();
-  if (surfaceCache && surfaceCache.raw === s.mask) return surfaceCache;
-  const bin = atob(s.mask);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
-  const grid = new Uint8Array(s.cols * s.rows);
-  for (let i = 0; i < grid.length; i += 1) grid[i] = (bytes[i >> 3] >> (7 - (i & 7))) & 1;
-  surfaceCache = { raw: s.mask, cols: s.cols, rows: s.rows, grid };
-  return surfaceCache;
-}
-
-/**
- * 没有场景档案（用户换了张自己拍的桌面）时，现场从底图估一张「可落区」：
- * 缩到 192×108 → 找亮度直方图的众数（桌面通常是画面里面积最大的同一个亮度）
- * → 取 ±14 的亮度带 → 最大 4 连通块 → 补内部小洞 → 降采样到 96×54 → 腐蚀一圈。
- * 只在「这块面积占画面 12%~80%」时才信它，否则当作识别失败，不做限制。
- */
-function autoSurfaceMask() {
-  if (!view.base) return null;
-  if (surfaceCache && surfaceCache.autoOf === view.base.src) return surfaceCache.usable ? surfaceCache : null;
-
-  const COLS = 96;
-  const ROWS = 54;
-  const W = 192;
-  const H = 108;
-  const c = document.createElement('canvas');
-  c.width = W;
-  c.height = H;
-  const g = c.getContext('2d', { willReadFrequently: true });
-  g.drawImage(view.base, 0, 0, W, H);
-  const d = g.getImageData(0, 0, W, H).data;
-  const n = W * H;
-  const lum = new Float32Array(n);
-  const hist = new Float64Array(256);
-  for (let i = 0; i < n; i += 1) {
-    const v = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
-    lum[i] = v;
-    hist[Math.min(255, Math.max(0, Math.round(v)))] += 1;
-  }
-  // 平滑一下再找众数，避免被单一亮度尖峰带偏
-  let mode = 128;
-  let modeScore = -1;
-  for (let t = 2; t < 254; t += 1) {
-    const score = hist[t - 2] + hist[t - 1] + hist[t] + hist[t + 1] + hist[t + 2];
-    if (score > modeScore) {
-      modeScore = score;
-      mode = t;
+  if (s && s.mask) {
+    if (!surfaceCache || surfaceCache.raw !== s.mask) {
+      const decoded = decodeSurface(s);
+      surfaceCache = decoded ? { ...decoded, raw: s.mask } : null;
     }
+    return surfaceCache;
   }
-  const band = 14;
-  const mask = new Uint8Array(n);
-  for (let i = 0; i < n; i += 1) mask[i] = Math.abs(lum[i] - mode) <= band ? 1 : 0;
-
-  // 最大 4 连通块
-  const seen = new Uint8Array(n);
-  const stack = [];
-  let bestPixels = null;
-  let bestCount = 0;
-  for (let start = 0; start < n; start += 1) {
-    if (!mask[start] || seen[start]) continue;
-    stack.length = 0;
-    stack.push(start);
-    seen[start] = 1;
-    const cells = [];
-    while (stack.length) {
-      const p = stack.pop();
-      cells.push(p);
-      const x = p % W;
-      const y = (p - x) / W;
-      if (x > 0) {
-        const q = p - 1;
-        if (mask[q] && !seen[q]) {
-          seen[q] = 1;
-          stack.push(q);
-        }
-      }
-      if (x < W - 1) {
-        const q = p + 1;
-        if (mask[q] && !seen[q]) {
-          seen[q] = 1;
-          stack.push(q);
-        }
-      }
-      if (y > 0) {
-        const q = p - W;
-        if (mask[q] && !seen[q]) {
-          seen[q] = 1;
-          stack.push(q);
-        }
-      }
-      if (y < H - 1) {
-        const q = p + W;
-        if (mask[q] && !seen[q]) {
-          seen[q] = 1;
-          stack.push(q);
-        }
-      }
-    }
-    if (cells.length > bestCount) {
-      bestCount = cells.length;
-      bestPixels = cells;
-    }
-  }
-  if (!bestPixels) return null;
-  const share = bestCount / n;
-  if (share < 0.12 || share > 0.8) {
-    surfaceCache = { autoOf: view.base.src, usable: false };
-    return null;
-  }
-
-  const grid = new Uint8Array(COLS * ROWS);
-  const cw = W / COLS;
-  const ch = H / ROWS;
-  const counts = new Uint32Array(COLS * ROWS);
-  for (const p of bestPixels) {
-    const x = p % W;
-    const y = (p - x) / W;
-    counts[Math.min(ROWS - 1, Math.floor(y / ch)) * COLS + Math.min(COLS - 1, Math.floor(x / cw))] += 1;
-  }
-  const cellArea = cw * ch;
-  for (let i = 0; i < grid.length; i += 1) grid[i] = counts[i] > cellArea * 0.6 ? 1 : 0;
-
-  // 补洞：一行/一列里被桌面夹住的短空档（纸巾包、阴影留下的洞）填上
-  for (let r = 0; r < ROWS; r += 1) {
-    for (let cIdx = 1; cIdx < COLS - 1; cIdx += 1) {
-      if (grid[r * COLS + cIdx]) continue;
-      let right = cIdx;
-      while (right < COLS && !grid[r * COLS + right]) right += 1;
-      if (right < COLS && right - cIdx <= 8 && cIdx > 0) {
-        for (let k = cIdx; k < right; k += 1) grid[r * COLS + k] = 1;
-        cIdx = right;
-      }
-    }
-  }
-  for (let cIdx = 0; cIdx < COLS; cIdx += 1) {
-    for (let r = 1; r < ROWS - 1; r += 1) {
-      if (grid[r * COLS + cIdx]) continue;
-      let down = r;
-      while (down < ROWS && !grid[down * COLS + cIdx]) down += 1;
-      if (down < ROWS && down - r <= 8) {
-        for (let k = r; k < down; k += 1) grid[k * COLS + cIdx] = 1;
-        r = down;
-      }
-    }
-  }
-
-  // 腐蚀一圈：别把东西摆到桌沿上
-  const eroded = new Uint8Array(grid.length);
-  for (let r = 1; r < ROWS - 1; r += 1) {
-    for (let cIdx = 1; cIdx < COLS - 1; cIdx += 1) {
-      const i = r * COLS + cIdx;
-      if (!grid[i]) continue;
-      let ok = true;
-      for (let dr = -1; dr <= 1 && ok; dr += 1) {
-        for (let dc = -1; dc <= 1; dc += 1) {
-          if (!grid[(r + dr) * COLS + cIdx + dc]) {
-            ok = false;
-            break;
-          }
-        }
-      }
-      if (ok) eroded[i] = 1;
-    }
-  }
-  surfaceCache = { raw: 'auto', autoOf: view.base.src, usable: true, cols: COLS, rows: ROWS, grid: eroded };
-  return surfaceCache;
+  // 没有场景档案（用户换了自己的照片）：现场从底图估一张
+  const auto = coreAutoSurface(view.base);
+  return auto ? { ...auto, raw: 'auto' } : null;
 }
 
 /** 这个尺寸摆在这个位置上，九个采样点是不是都在桌面上 */
 function surfaceFits(cx, cy, geo) {
-  const sm = surfaceMask();
-  if (!sm) return true;
-  const rad = ((view.phone?.rot || 0) * Math.PI) / 180;
-  const hh = (geo.h / 2) * (view.phone?.squash || 1);
-  const hw = geo.w / 2;
-  for (let sx = -1; sx <= 1; sx += 1) {
-    for (let sy = -1; sy <= 1; sy += 1) {
-      const x = sx * hw;
-      const y = sy * hh;
-      const px2 = cx + x * Math.cos(rad) - y * Math.sin(rad);
-      const py2 = cy + x * Math.sin(rad) + y * Math.cos(rad);
-      if (px2 < 0 || py2 < 0 || px2 >= canvas.width || py2 >= canvas.height) return false;
-      const c = Math.min(sm.cols - 1, Math.floor((px2 / canvas.width) * sm.cols));
-      const r = Math.min(sm.rows - 1, Math.floor((py2 / canvas.height) * sm.rows));
-      if (!sm.grid[r * sm.cols + c]) return false;
-    }
-  }
-  return true;
+  return surfaceOk(surfaceMask(), canvas.width, canvas.height, cx, cy, geo, view.phone?.rot || 0, view.phone?.squash ?? 1);
 }
 
 /** 别把物体拖出画布：按旋转后的外接框把中心点夹回来 */
 function clampIntoCanvas(x, y, geo) {
-  const rad = ((view.phone?.rot || 0) * Math.PI) / 180;
-  const hw = geo.w / 2;
-  const hh = (geo.h / 2) * (view.phone?.squash || 1);
-  const rx = Math.abs(hw * Math.cos(rad)) + Math.abs(hh * Math.sin(rad));
-  const ry = Math.abs(hw * Math.sin(rad)) + Math.abs(hh * Math.cos(rad));
-  return {
-    x: Math.min(Math.max(x, rx), canvas.width - rx),
-    y: Math.min(Math.max(y, ry), canvas.height - ry),
-  };
+  return coreClampIntoCanvas(canvas.width, canvas.height, x, y, geo, view.phone?.rot || 0, view.phone?.squash ?? 1);
 }
 
 /** 摆不下就往外找最近一个能整个落在桌面上的位置 */
 function fitToSurface(cx, cy, geo) {
-  if (surfaceFits(cx, cy, geo)) return { x: cx, y: cy };
-  const step = Math.max(18, Math.round(geo.w * 0.1));
-  const limit = Math.max(canvas.width, canvas.height) * 0.7;
-  for (let r = step; r <= limit; r += step) {
-    for (let a = 0; a < 16; a += 1) {
-      const ang = (a / 16) * Math.PI * 2;
-      const x = cx + Math.cos(ang) * r;
-      const y = cy + Math.sin(ang) * r;
-      if (surfaceFits(x, y, geo)) return { x, y };
-    }
-  }
-  return { x: cx, y: cy };
+  return findFittingCenter(surfaceMask(), canvas.width, canvas.height, cx, cy, geo, view.phone?.rot || 0, view.phone?.squash ?? 1);
 }
 
 function sceneSlots() {
@@ -704,15 +537,14 @@ function phoneSize() {
 
   const target = readTarget();
   const longCm = Math.max(target.w || 0, target.h || 0) || phone.cmLong || 15.2;
-  const mul = phone.mul || 1;
-  const longPx = longCm * scale * mul;
-
-  const cutW = phone.w || 1;
-  const cutH = phone.h || 1;
-  const aspect = cutW / cutH; // >1 横躺、<1 竖着
-  const w = aspect >= 1 ? longPx : longPx * aspect;
-  const h = aspect >= 1 ? longPx / aspect : longPx;
-  return { w, h, longCm, aspect, targetAspect: Math.max(target.w, target.h) / Math.max(0.1, Math.min(target.w, target.h)) };
+  const { w, h, aspect } = sizeForCut(phone.w, phone.h, longCm, scale, phone.mul || 1);
+  return {
+    w,
+    h,
+    longCm,
+    aspect,
+    targetAspect: Math.max(target.w, target.h) / Math.max(0.1, Math.min(target.w, target.h)),
+  };
 }
 
 /** 切图比例和你填的尺寸差太多时，给一句人话提示 */
@@ -1179,14 +1011,7 @@ function greenShare(canvasEl) {
  *   gray  —— 备用，浅灰幕布；绿幕反光把深色布料染绿、或主体本身就是绿色时改用它
  */
 function subjectPrompt(backdrop = 'green') {
-  const desc = ($('prompt').value || DEFAULT_SUBJECT).trim();
-  const view = '正俯视图：镜头垂直向下 90°，正交投影，物体平放在桌面、从上往下看，没有透视、没有斜角、没有侧立面；画面里只有这一个物体，没有别的物品、没有文字、没有水印。';
-  const frame = '背景是一整块铺满整张画面的幕布，四边都是它，不要画成一张卡片、不要给画面留白边、幕布里不要有任何文字、水印、图案或渐变；物体必须完整地落在画面里面，四周留出一圈空白，不要被画框裁切、不要贴边。';
-  const bg =
-    backdrop === 'gray'
-      ? '背景必须是一整块均匀的浅灰色幕布（约 #E8E8E8），不是白、不是渐变、没有纹理、没有任何杂物；物体和背景对比清晰，物体边缘不要有灰色描边，四周不要有投影、不要有阴影、不要有光晕。'
-      : '背景必须是一整块均匀的纯绿色色键幕布（chroma key green，约 #00C853），不是白、不是灰、不是渐变；物体四周不要有投影、不要有阴影、不要有光晕；物体表面不要被绿光染到，物体和幕布之间边缘清晰。物体本身的颜色必须和幕布明显不同：黑色、银色、金色、蓝色、红色、粉色、棕色都可以，不要用绿色、墨绿、橄榄绿、荧光绿。';
-  return `${desc}。${view}${frame}${bg}`;
+  return buildSubjectPrompt(($('prompt').value || DEFAULT_SUBJECT).trim(), backdrop);
 }
 
 /* ------------------------------------------------ 名称 → 描述 + 尺寸 */

@@ -1265,3 +1265,209 @@ h2 {
     font-size: 11px;
   }
 }
+
+/* --------------------------------------------------------------- 批量面板 */
+
+.batchpanel {
+  padding-bottom: 60px;
+}
+
+.batch-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.batch-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.batch-head .sub {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.batch-head .spacer {
+  flex: 1;
+}
+
+.batch-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.batch-bar .bfield {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.batch-bar .bfield strong {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 11.5px;
+}
+
+.batch-bar .input {
+  height: 28px;
+  min-width: 86px;
+  font-size: 12.5px;
+  padding: 0 8px;
+}
+
+.batch-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.batch-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.bbar {
+  flex: 1;
+  min-width: 200px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--control);
+  overflow: hidden;
+}
+
+.bbar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+
+.bstat {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-list {
+  max-height: calc(100vh - 320px);
+  overflow: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.batch-list table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.batch-list th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--page);
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.batch-list td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line-soft, #f2f3f5);
+  vertical-align: middle;
+}
+
+.batch-list tr.is-run td {
+  background: var(--accent-soft);
+}
+
+.batch-list tr.is-fail td {
+  background: #fff6f6;
+}
+
+.bmono {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.bthumb {
+  width: 52px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--control);
+  display: block;
+}
+
+.btag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--control);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.btag.ok {
+  border-color: #cfe3d2;
+  background: #f2fbf4;
+  color: #1c6b32;
+}
+
+.btag.err {
+  border-color: #f3cfcf;
+  background: #fff5f5;
+  color: #a4231f;
+}
+
+.btag.run {
+  border-color: #cfd9f7;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.bfile {
+  font-size: 11.5px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.batch-note {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.75;
+  padding-top: 12px;
+}
+
+@media (max-width: 900px) {
+  .batch-list {
+    max-height: none;
+  }
+
+  .batch-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+}
