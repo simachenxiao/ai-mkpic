@@ -1761,7 +1761,9 @@ function updateToolstrip() {
 
   const geo = phoneSize();
   const target = readTarget();
-  const extreme = geo && (Math.max(geo.aspect, 1 / geo.aspect) > 6);
+  // 又长又细是正常物品（口红、笔、数据线）；只有「比你自己填的还夸张很多」才提醒
+  const extreme =
+    geo && Math.max(geo.aspect, 1 / geo.aspect) > 8 && Math.max(geo.aspect, 1 / geo.aspect) / Math.max(geo.targetAspect, 1) > 2;
   $('subjectVal').textContent = view.phone
     ? geo
       ? `${trim(geo.longCm)} cm 长边 → ${Math.round(geo.w)}×${Math.round(geo.h)} px` +

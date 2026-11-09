@@ -2,7 +2,7 @@
 
 把一台手机（或任何东西）按**真实比例**放进你自己拍的照片里。底图是 `base.jpg`——白色桌面、一包纸巾、一个充电器和一根线；纸巾包和充电器就是画面里的尺子。
 
-零依赖，只用 Node 20+ 自带模块。生图走 OpenAI Images API 兼容的中转：`https://www.ccsub.net/api/v1`。
+零依赖，只用 Node 20+ 自带模块。生图走 OpenAI Images API 兼容的中转：`https://lingsuan.org/v1`，默认模型 `gpt-image-2`。
 
 ## 快速开始
 
@@ -15,7 +15,7 @@ Windows 直接双击 **`启动.cmd`**（会自动开浏览器）。
 参数写在 `.env`：
 
 ```ini
-IMAGE_BASE_URL=https://www.ccsub.net/api/v1
+IMAGE_BASE_URL=https://lingsuan.org/v1
 IMAGE_API_KEY=sk-...
 PORT=8787
 IMAGE_TIMEOUT_MS=300000
@@ -127,71 +127,7 @@ Key 只存在服务端，前端拿不到。
 - 在 `generations` 里塞 `image`（data URL / 数组）、改走 multipart → 都不生效。
 - 验证方法：底图 + 「把这张照片里的桌面转成卡通，构图不变」，输出是一张和原图毫无关系的插画。
   说明**参考图被丢弃了，这个接口是纯文生图**。
-- 支持的模型（上游报错里列的）：`gpt-image-1`、`openai-image`、`dall-e-3`、`dall-e-2`、
-  `gemini-image`、`gemini-2.5-flash-image`、`cogview-4`、`cogview-3-flash`。其中 `openai-image`
-  实测常常回空图。
-- 上游偶尔 ~20 秒就返回 `{"data":[{"b64_json":""}]}`（空图，多半是转发超时），服务端会自动重试
-  `IMAGE_RETRY` 次。
-
-所以「保住原图 + 尺寸准确」这件事，靠接口做不到；这个应用用**标定 + 合成**来做，模型只负责画主体。
-gpt-image-1 也好、gemini-2.5-flash-image 也好，在这套接口下都只有「画一张」这一种能力，
-换模型不会让它变成图生图——差别只在画风：gpt-image-1 更广告、构图更爱重排；gemini 那台更贴产品图。
-（早先版本里那个「AI 重画整张画面」的模式已经删掉了：它不参考原图，出来的是另一张桌子。）
-
-## 场景档案 `scenes/base.json`
-
-底图固定时，几何关系是常量，量一次就够了：
-
-```json
-{
-  "calibration": { "index": 0, "pixels": 123 },   // 第 0 个参照物（纸巾包）在底图上长约 123 px
-  "planeDeg": -16,                                 // 桌面倾斜角度，物体自动按这个角度摆
-  "squash": 0.96,                                  // 俯拍透视压缩
-  "lightDeg": 135,                                 // 光来向 → 阴影往左下
-  "placement": { "mode": "auto" },                  // auto = 按 slots 挑空位；fixed = 固定 x/y
-  "occupied": [ { "x": 992, "y": 412, "w": 145, "h": 155 } ],   // 已有物品，别压上
-  "slots":    [ { "x": 1288, "y": 548, "r": 168, "label": "纸巾包右侧" } ]
-}
-```
-
-比例是**算出来的**，不是写死的：`pxPerCm = pixels ÷ 参照物输入框里最长的那条边`。
-尺寸栏的约定：**宽 = 短边，长 = 长边**（参照物和主体都一样），量尺沿参照物最长的一边拖。
-所以改「尺寸参照」里任何一个 cm 数字，比例、物体大小、提示词都会立刻跟着变（不用重新生成）：
-
-| 纸巾包 长边填 | 1 cm ≈ | 手机 7.2×15.2 cm = |
-| --- | --- | --- |
-| 5.5 cm（当前） | 22.4 px | 161 × 340 px |
-| 9.5 cm | 12.9 px | 93 × 196 px |
-
-页面上的手量尺优先于档案，量错了点「用回档案」即可。`slots` 按顺序优先，压到 `occupied` 才往后排。
-换一张底图：图片放进根目录，复制一份 `scenes/base.json` 改成同名 `.json`，重标 `pixels` 和空位坐标。
-
-## 目录
-
-```
-server.mjs        本地服务：静态页面 + 上游代理 + 场景档案 + 保存结果
-scenes/           场景档案（预标定比例、桌面角度、空位、光照）
-public/           前端（原生 JS，无构建）
-output/           生成与合成的结果（.jpg/.png + 同名 .json 记录）
-base.jpg          默认底图
-.env / .env.example
-启动.cmd          Windows 一键启动
-```
-
-## 接口
-
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/config` | 模型列表、默认提示词、Key 状态 |
-| GET | `/api/history` | 历史记录（按时间倒序，最多 60 条） |
-| GET | `/api/scene?image=base` | 场景档案，没有就返回 `{}` |
-| POST | `/api/generate` | 转发到上游 `images/generations`，成功后落盘 |
-| POST | `/api/save` | 存前端合成好的图（data URL） |
-| GET | `/output/<file>` | 取结果文件 |
-
-## 几种会翻车的情况
-
-- **一直空图**：上游排队超时，连点两次通常就回来了；也可以把画幅换成 `1024x1024`。
-- **抠图失败**：主体本身是白的（白手机、白杯子），白底和白主体分不开。描述里写明颜色，或生成后再重试。
-- **比例看着不对**：标尺要量在**同一张桌面上**、和主体差不多远近的参照物。照片是斜拍的，离镜头远的东西本来就更小，透视线上的误差合成不了。
-- **想换桌子**：点左下角参考图换一张自己拍的，重新拖一条线即可。
+- 当前上游 lingsuan 的 `/v1/models` 有 14 个：`gpt-image-2`（默认）、`gpt-image-2.5-sunburst`、
+  `gpt-image-2.6-sunburst`、`gpt-image-2.5-flare`、`gpt-image-1.5`、`gpt-image-1`、`gpt-image-2-firefly` …
+  另外还有 `gpt-6-luna` / `gpt-5.6-luna`（对话模型，用来写描述、估尺寸）。
+- 早先的 ccsub 分组只有 `gpt-image-1`、`gemini-2.5-flash-image`、`cogview-4` 那几个，且 `openai-image` 常回空图。

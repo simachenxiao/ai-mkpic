@@ -35,32 +35,32 @@ const ITEM_CACHE_FILE = path.join(CACHE_DIR, 'items.json');
 /** 上游实测支持的模型；reference 表示是否真的吃得下参考图 */
 const MODELS = [
   {
-    id: 'gemini-2.5-flash-image',
-    label: 'gemini-2.5-flash-image',
-    note: '保留原图桌面与参照物，改动最克制（推荐）',
-    reference: true,
+    id: 'gpt-image-2',
+    label: 'gpt-image-2',
+    note: '当前默认：细节和材质最稳，绿幕抠图干净',
+    reference: false,
+    sizes: ['1024x1024', '1536x1024', '1024x1536'],
+  },
+  {
+    id: 'gpt-image-1.5',
+    label: 'gpt-image-1.5',
+    note: '同代旧版，出图更快一点，细节略少',
+    reference: false,
     sizes: ['1024x1024', '1536x1024', '1024x1536'],
   },
   {
     id: 'gpt-image-1',
     label: 'gpt-image-1',
-    note: '质感更广告，构图会重绘一部分',
-    reference: true,
+    note: '老版本，风格更平，偶尔糊',
+    reference: false,
     sizes: ['1024x1024', '1536x1024', '1024x1536'],
   },
   {
-    id: 'gemini-image',
-    label: 'gemini-image',
-    note: '上游别名，行为未逐一验证',
-    reference: true,
-    sizes: ['1024x1024'],
-  },
-  {
-    id: 'cogview-4',
-    label: 'cogview-4',
-    note: '纯文生图，会忽略参考图',
+    id: 'gpt-image-2.5-sunburst',
+    label: 'gpt-image-2.5-sunburst',
+    note: '新一代变体，画面更亮、光比更大（未逐一验证）',
     reference: false,
-    sizes: ['1024x1024', '768x1344', '864x1152'],
+    sizes: ['1024x1024', '1536x1024', '1024x1536'],
   },
 ];
 
