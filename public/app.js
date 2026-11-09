@@ -437,7 +437,7 @@ let surfaceCache = null;
 /** scenes/*.json 里的 surface：96×54 的桌面掩膜，摆大件时别让它们挂到桌沿外面 */
 function surfaceMask() {
   const s = state.scene?.surface;
-  if (!s || !s.mask || !s.cols || !s.rows) return null;
+  if (!s || !s.mask || !s.cols || !s.rows) return autoSurfaceMask();
   if (surfaceCache && surfaceCache.raw === s.mask) return surfaceCache;
   const bin = atob(s.mask);
   const bytes = new Uint8Array(bin.length);
@@ -445,6 +445,163 @@ function surfaceMask() {
   const grid = new Uint8Array(s.cols * s.rows);
   for (let i = 0; i < grid.length; i += 1) grid[i] = (bytes[i >> 3] >> (7 - (i & 7))) & 1;
   surfaceCache = { raw: s.mask, cols: s.cols, rows: s.rows, grid };
+  return surfaceCache;
+}
+
+/**
+ * 没有场景档案（用户换了张自己拍的桌面）时，现场从底图估一张「可落区」：
+ * 缩到 192×108 → 找亮度直方图的众数（桌面通常是画面里面积最大的同一个亮度）
+ * → 取 ±14 的亮度带 → 最大 4 连通块 → 补内部小洞 → 降采样到 96×54 → 腐蚀一圈。
+ * 只在「这块面积占画面 12%~80%」时才信它，否则当作识别失败，不做限制。
+ */
+function autoSurfaceMask() {
+  if (!view.base) return null;
+  if (surfaceCache && surfaceCache.autoOf === view.base.src) return surfaceCache.usable ? surfaceCache : null;
+
+  const COLS = 96;
+  const ROWS = 54;
+  const W = 192;
+  const H = 108;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(view.base, 0, 0, W, H);
+  const d = g.getImageData(0, 0, W, H).data;
+  const n = W * H;
+  const lum = new Float32Array(n);
+  const hist = new Float64Array(256);
+  for (let i = 0; i < n; i += 1) {
+    const v = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+    lum[i] = v;
+    hist[Math.min(255, Math.max(0, Math.round(v)))] += 1;
+  }
+  // 平滑一下再找众数，避免被单一亮度尖峰带偏
+  let mode = 128;
+  let modeScore = -1;
+  for (let t = 2; t < 254; t += 1) {
+    const score = hist[t - 2] + hist[t - 1] + hist[t] + hist[t + 1] + hist[t + 2];
+    if (score > modeScore) {
+      modeScore = score;
+      mode = t;
+    }
+  }
+  const band = 14;
+  const mask = new Uint8Array(n);
+  for (let i = 0; i < n; i += 1) mask[i] = Math.abs(lum[i] - mode) <= band ? 1 : 0;
+
+  // 最大 4 连通块
+  const seen = new Uint8Array(n);
+  const stack = [];
+  let bestPixels = null;
+  let bestCount = 0;
+  for (let start = 0; start < n; start += 1) {
+    if (!mask[start] || seen[start]) continue;
+    stack.length = 0;
+    stack.push(start);
+    seen[start] = 1;
+    const cells = [];
+    while (stack.length) {
+      const p = stack.pop();
+      cells.push(p);
+      const x = p % W;
+      const y = (p - x) / W;
+      if (x > 0) {
+        const q = p - 1;
+        if (mask[q] && !seen[q]) {
+          seen[q] = 1;
+          stack.push(q);
+        }
+      }
+      if (x < W - 1) {
+        const q = p + 1;
+        if (mask[q] && !seen[q]) {
+          seen[q] = 1;
+          stack.push(q);
+        }
+      }
+      if (y > 0) {
+        const q = p - W;
+        if (mask[q] && !seen[q]) {
+          seen[q] = 1;
+          stack.push(q);
+        }
+      }
+      if (y < H - 1) {
+        const q = p + W;
+        if (mask[q] && !seen[q]) {
+          seen[q] = 1;
+          stack.push(q);
+        }
+      }
+    }
+    if (cells.length > bestCount) {
+      bestCount = cells.length;
+      bestPixels = cells;
+    }
+  }
+  if (!bestPixels) return null;
+  const share = bestCount / n;
+  if (share < 0.12 || share > 0.8) {
+    surfaceCache = { autoOf: view.base.src, usable: false };
+    return null;
+  }
+
+  const grid = new Uint8Array(COLS * ROWS);
+  const cw = W / COLS;
+  const ch = H / ROWS;
+  const counts = new Uint32Array(COLS * ROWS);
+  for (const p of bestPixels) {
+    const x = p % W;
+    const y = (p - x) / W;
+    counts[Math.min(ROWS - 1, Math.floor(y / ch)) * COLS + Math.min(COLS - 1, Math.floor(x / cw))] += 1;
+  }
+  const cellArea = cw * ch;
+  for (let i = 0; i < grid.length; i += 1) grid[i] = counts[i] > cellArea * 0.6 ? 1 : 0;
+
+  // 补洞：一行/一列里被桌面夹住的短空档（纸巾包、阴影留下的洞）填上
+  for (let r = 0; r < ROWS; r += 1) {
+    for (let cIdx = 1; cIdx < COLS - 1; cIdx += 1) {
+      if (grid[r * COLS + cIdx]) continue;
+      let right = cIdx;
+      while (right < COLS && !grid[r * COLS + right]) right += 1;
+      if (right < COLS && right - cIdx <= 8 && cIdx > 0) {
+        for (let k = cIdx; k < right; k += 1) grid[r * COLS + k] = 1;
+        cIdx = right;
+      }
+    }
+  }
+  for (let cIdx = 0; cIdx < COLS; cIdx += 1) {
+    for (let r = 1; r < ROWS - 1; r += 1) {
+      if (grid[r * COLS + cIdx]) continue;
+      let down = r;
+      while (down < ROWS && !grid[down * COLS + cIdx]) down += 1;
+      if (down < ROWS && down - r <= 8) {
+        for (let k = r; k < down; k += 1) grid[k * COLS + cIdx] = 1;
+        r = down;
+      }
+    }
+  }
+
+  // 腐蚀一圈：别把东西摆到桌沿上
+  const eroded = new Uint8Array(grid.length);
+  for (let r = 1; r < ROWS - 1; r += 1) {
+    for (let cIdx = 1; cIdx < COLS - 1; cIdx += 1) {
+      const i = r * COLS + cIdx;
+      if (!grid[i]) continue;
+      let ok = true;
+      for (let dr = -1; dr <= 1 && ok; dr += 1) {
+        for (let dc = -1; dc <= 1; dc += 1) {
+          if (!grid[(r + dr) * COLS + cIdx + dc]) {
+            ok = false;
+            break;
+          }
+        }
+      }
+      if (ok) eroded[i] = 1;
+    }
+  }
+  surfaceCache = { raw: 'auto', autoOf: view.base.src, usable: true, cols: COLS, rows: ROWS, grid: eroded };
   return surfaceCache;
 }
 
@@ -533,21 +690,42 @@ function provisionalScale() {
   return (canvas.width * 0.12) / (readTarget().w || 7.2);
 }
 
+/**
+ * 摆到画布上的像素尺寸。
+ *
+ * 规矩：**长边对齐长边**，短边按切图自己的比例还原 —— 绝不按「填的宽高比」拉伸切图，
+ * 否则模型画歪一点（比如口红的圆头被画成侧躺的长条）就会被压成变形。
+ * 填的尺寸只决定「有多大」，不决定「什么形状」。
+ */
 function phoneSize() {
   const scale = pxPerCm() || provisionalScale();
   const phone = view.phone;
   if (!phone || !scale) return null;
 
   const target = readTarget();
-  const shortCm = target.w || phone.cmW || 7.2; // 宽 = 短边
-  const longCm = target.h || phone.cmH || shortCm * (phone.h / phone.w); // 长 = 长边
+  const longCm = Math.max(target.w || 0, target.h || 0) || phone.cmLong || 15.2;
   const mul = phone.mul || 1;
+  const longPx = longCm * scale * mul;
 
-  // 切图横躺就把长边放到水平方向，竖着放就放到垂直方向
-  const landscape = phone.w >= phone.h;
-  const w = (landscape ? longCm : shortCm) * scale * mul;
-  const h = (landscape ? shortCm : longCm) * scale * mul;
-  return { w, h };
+  const cutW = phone.w || 1;
+  const cutH = phone.h || 1;
+  const aspect = cutW / cutH; // >1 横躺、<1 竖着
+  const w = aspect >= 1 ? longPx : longPx * aspect;
+  const h = aspect >= 1 ? longPx / aspect : longPx;
+  return { w, h, longCm, aspect, targetAspect: Math.max(target.w, target.h) / Math.max(0.1, Math.min(target.w, target.h)) };
+}
+
+/** 切图比例和你填的尺寸差太多时，给一句人话提示 */
+function aspectNote(geo) {
+  if (!geo) return '';
+  const cut = Math.max(geo.aspect, 1 / geo.aspect);
+  const want = Math.max(geo.targetAspect, 1);
+  if (!Number.isFinite(cut) || !Number.isFinite(want) || want <= 0) return '';
+  const off = cut / want;
+  if (off > 1.25 || off < 0.8) {
+    return `切图比例 ${cut.toFixed(2)}:1，你填的是 ${want.toFixed(2)}:1 —— 按长边对齐摆放，不受影响的就是形状`;
+  }
+  return '';
 }
 
 function lightVector() {
@@ -1351,7 +1529,7 @@ function applyCandidate(candidate, opts = {}) {
     rot: previous?.rot ?? 0,
     mul: previous?.mul ?? 1,
     squash: previous?.squash ?? 1,
-    cmW: readTarget().w || 7.2,
+    cmLong: Math.max(readTarget().w, readTarget().h) || 15.2,
   };
   setTool('move');
   if (opts.autoPlace) autoPlace();
@@ -1583,9 +1761,15 @@ function updateToolstrip() {
 
   const geo = phoneSize();
   const target = readTarget();
+  const extreme = geo && (Math.max(geo.aspect, 1 / geo.aspect) > 6);
   $('subjectVal').textContent = view.phone
     ? geo
-      ? `${trim(target.w)}×${trim(target.h)} cm → ${Math.round(geo.w)}×${Math.round(geo.h)} px（宽×高）`
+      ? `${trim(geo.longCm)} cm 长边 → ${Math.round(geo.w)}×${Math.round(geo.h)} px` +
+        (extreme
+          ? '（切图太细长，像是被拉过 —— 换个描述重画更稳）'
+          : aspectNote(geo)
+            ? '（切图比例与填的尺寸不同，按长边对齐）'
+            : '')
       : `${trim(target.w)} cm，等标定`
     : '白底主体会自动抠图';
 
