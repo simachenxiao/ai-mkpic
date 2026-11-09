@@ -430,6 +430,75 @@ function pxPerCm() {
   return Number(state.scene?.pxPerCm) || 0;
 }
 
+/* ------------------------------------------------------- 桌面可落区 */
+
+let surfaceCache = null;
+
+/** scenes/*.json 里的 surface：96×54 的桌面掩膜，摆大件时别让它们挂到桌沿外面 */
+function surfaceMask() {
+  const s = state.scene?.surface;
+  if (!s || !s.mask || !s.cols || !s.rows) return null;
+  if (surfaceCache && surfaceCache.raw === s.mask) return surfaceCache;
+  const bin = atob(s.mask);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  const grid = new Uint8Array(s.cols * s.rows);
+  for (let i = 0; i < grid.length; i += 1) grid[i] = (bytes[i >> 3] >> (7 - (i & 7))) & 1;
+  surfaceCache = { raw: s.mask, cols: s.cols, rows: s.rows, grid };
+  return surfaceCache;
+}
+
+/** 这个尺寸摆在这个位置上，九个采样点是不是都在桌面上 */
+function surfaceFits(cx, cy, geo) {
+  const sm = surfaceMask();
+  if (!sm) return true;
+  const rad = ((view.phone?.rot || 0) * Math.PI) / 180;
+  const hh = (geo.h / 2) * (view.phone?.squash || 1);
+  const hw = geo.w / 2;
+  for (let sx = -1; sx <= 1; sx += 1) {
+    for (let sy = -1; sy <= 1; sy += 1) {
+      const x = sx * hw;
+      const y = sy * hh;
+      const px2 = cx + x * Math.cos(rad) - y * Math.sin(rad);
+      const py2 = cy + x * Math.sin(rad) + y * Math.cos(rad);
+      if (px2 < 0 || py2 < 0 || px2 >= canvas.width || py2 >= canvas.height) return false;
+      const c = Math.min(sm.cols - 1, Math.floor((px2 / canvas.width) * sm.cols));
+      const r = Math.min(sm.rows - 1, Math.floor((py2 / canvas.height) * sm.rows));
+      if (!sm.grid[r * sm.cols + c]) return false;
+    }
+  }
+  return true;
+}
+
+/** 别把物体拖出画布：按旋转后的外接框把中心点夹回来 */
+function clampIntoCanvas(x, y, geo) {
+  const rad = ((view.phone?.rot || 0) * Math.PI) / 180;
+  const hw = geo.w / 2;
+  const hh = (geo.h / 2) * (view.phone?.squash || 1);
+  const rx = Math.abs(hw * Math.cos(rad)) + Math.abs(hh * Math.sin(rad));
+  const ry = Math.abs(hw * Math.sin(rad)) + Math.abs(hh * Math.cos(rad));
+  return {
+    x: Math.min(Math.max(x, rx), canvas.width - rx),
+    y: Math.min(Math.max(y, ry), canvas.height - ry),
+  };
+}
+
+/** 摆不下就往外找最近一个能整个落在桌面上的位置 */
+function fitToSurface(cx, cy, geo) {
+  if (surfaceFits(cx, cy, geo)) return { x: cx, y: cy };
+  const step = Math.max(18, Math.round(geo.w * 0.1));
+  const limit = Math.max(canvas.width, canvas.height) * 0.7;
+  for (let r = step; r <= limit; r += step) {
+    for (let a = 0; a < 16; a += 1) {
+      const ang = (a / 16) * Math.PI * 2;
+      const x = cx + Math.cos(ang) * r;
+      const y = cy + Math.sin(ang) * r;
+      if (surfaceFits(x, y, geo)) return { x, y };
+    }
+  }
+  return { x: cx, y: cy };
+}
+
 function sceneSlots() {
   if (Array.isArray(state.scene?.slots) && state.scene.slots.length) return state.scene.slots;
   return [{ x: canvas.width * 0.45, y: canvas.height * 0.6, r: canvas.width * 0.1, label: '桌面中间' }];
@@ -512,13 +581,13 @@ function rebuildLayer() {
   g.save();
   g.translate(phone.cx, phone.cy);
   g.save();
-  g.translate(lightVector().x * geo.w * 0.06, lightVector().y * geo.w * 0.06);
+  g.translate(lightVector().x * geo.w * 0.13, lightVector().y * geo.w * 0.13);
   g.rotate(rad);
-  g.scale(geo.w * 0.54, geo.h * 0.5 * squash);
-  const grad = g.createRadialGradient(0, 0, 0, 0, 0, 1);
-  grad.addColorStop(0, 'rgba(10,10,12,0.42)');
-  grad.addColorStop(0.68, 'rgba(10,10,12,0.26)');
-  grad.addColorStop(1, 'rgba(10,10,12,0)');
+  g.scale(geo.w * 0.6, geo.h * 0.56 * squash);
+  const grad = g.createRadialGradient(0, 0, 0.1, 0, 0, 1);
+  grad.addColorStop(0, 'rgba(12,12,14,0.34)');
+  grad.addColorStop(0.6, 'rgba(12,12,14,0.2)');
+  grad.addColorStop(1, 'rgba(12,12,14,0)');
   g.fillStyle = grad;
   g.beginPath();
   g.arc(0, 0, 1, 0, Math.PI * 2);
@@ -591,8 +660,13 @@ function autoPlace() {
   if (!geo || !view.phone) return;
 
   if (state.placement.mode === 'fixed') {
-    view.phone.cx = clampRange(state.placement.x, 0, canvas.width);
-    view.phone.cy = clampRange(state.placement.y, 0, canvas.height);
+    const clamped = clampIntoCanvas(
+      clampRange(state.placement.x, 0, canvas.width),
+      clampRange(state.placement.y, 0, canvas.height),
+      geo,
+    );
+    view.phone.cx = clamped.x;
+    view.phone.cy = clamped.y;
     view.phone.rot = Number(state.scene?.planeDeg || 0);
     view.phone.squash = Number(state.scene?.squash || 1);
     view.phone.mul = 1;
@@ -633,12 +707,35 @@ function autoPlace() {
   const best = chosen || fallback;
 
   const slot = best ? best.slot : slots[0];
-  view.phone.cx = slot.x;
-  view.phone.cy = slot.y;
+  let geo2 = geo;
+  let fit = fitToSurface(slot.x, slot.y, geo2);
+  let mul = 1;
+  let shrank = false;
+  // 桌面上根本放不下这么大的东西：等比缩小到能放下（最低 55%），别让它挂到桌沿外面
+  if (!surfaceFits(fit.x, fit.y, geo2)) {
+    for (let k = 0.95; k >= 0.55; k -= 0.05) {
+      geo2 = { w: geo.w * k, h: geo.h * k };
+      const alt = fitToSurface(slot.x, slot.y, geo2);
+      if (surfaceFits(alt.x, alt.y, geo2)) {
+        mul = k;
+        fit = alt;
+        shrank = true;
+        break;
+      }
+    }
+  }
+  view.phone.cx = fit.x;
+  view.phone.cy = fit.y;
   view.phone.rot = Number(state.scene?.planeDeg || 0);
   view.phone.squash = Number(state.scene?.squash || 1);
-  view.phone.mul = 1;
-  state.placedLabel = slot.label || '';
+  view.phone.mul = mul;
+  const nudged = Math.round(Math.hypot(fit.x - slot.x, fit.y - slot.y));
+  const base = slot.label || '空位';
+  state.placedLabel = shrank
+    ? `${base} · 桌面放不下，缩到 ${Math.round(mul * 100)}%`
+    : nudged > 8
+      ? `${base} · 避开桌沿 ${nudged}px`
+      : base;
   return slot;
 }
 
@@ -664,8 +761,14 @@ function syncPlacementUI() {
 
 function applyPlacement() {
   if (!view.phone) return;
-  const x = clampRange($('posX').value, 0, canvas.width);
-  const y = clampRange($('posY').value, 0, canvas.height);
+  const geo = phoneSize() || { w: 0, h: 0 };
+  const clamped = clampIntoCanvas(
+    clampRange($('posX').value, 0, canvas.width),
+    clampRange($('posY').value, 0, canvas.height),
+    geo,
+  );
+  const x = clamped.x;
+  const y = clamped.y;
   state.placement = { mode: 'fixed', x, y };
   view.phone.cx = x;
   view.phone.cy = y;
@@ -868,11 +971,44 @@ function onPointerUp() {
 /* --------------------------------------------------------------- 抠图 */
 /* 白底抠图在 ./cutout.js，测试页可以直接复用 */
 
+/** 抠完之后主体还剩多少「绿色」像素：高了说明主体和绿幕撞色，边缘被啃掉了 */
+function greenShare(canvasEl) {
+  const c = document.createElement('canvas');
+  const scale = Math.max(canvasEl.width, canvasEl.height) / 72;
+  c.width = Math.max(8, Math.round(canvasEl.width / scale));
+  c.height = Math.max(8, Math.round(canvasEl.height / scale));
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(canvasEl, 0, 0, c.width, c.height);
+  const d = g.getImageData(0, 0, c.width, c.height).data;
+  let opaque = 0;
+  let green = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 160) continue;
+    opaque += 1;
+    const r = d[i];
+    const gg = d[i + 1];
+    const b = d[i + 2];
+    if (gg - Math.max(r, b) >= 24) green += 1;
+  }
+  return opaque ? green / opaque : 0;
+}
+
 /* --------------------------------------------------------------- 提示词 */
 
-function subjectPrompt() {
+/**
+ * 主体提示词。backdrop：
+ *   green —— 默认，纯绿色色键幕布（白/浅色主体也能抠干净）
+ *   gray  —— 备用，浅灰幕布；绿幕反光把深色布料染绿、或主体本身就是绿色时改用它
+ */
+function subjectPrompt(backdrop = 'green') {
   const desc = ($('prompt').value || DEFAULT_SUBJECT).trim();
-  return `${desc}。正俯视图：镜头垂直向下 90°，正交投影，物体平放在桌面、从上往下看，没有透视、没有斜角、没有侧立面；画面里只有这一个物体，没有别的物品、没有文字、没有水印。背景必须是一整块均匀的纯绿色色键幕布（chroma key green，约 #00C853），不是白、不是灰、不是渐变；物体四周不要有投影、不要有阴影、不要有光晕；物体表面不要染上绿色反光，物体和绿幕之间边缘清晰。`;
+  const view = '正俯视图：镜头垂直向下 90°，正交投影，物体平放在桌面、从上往下看，没有透视、没有斜角、没有侧立面；画面里只有这一个物体，没有别的物品、没有文字、没有水印。';
+  const frame = '背景是一整块铺满整张画面的幕布，四边都是它，不要画成一张卡片、不要给画面留白边、幕布里不要有任何文字、水印、图案或渐变；物体必须完整地落在画面里面，四周留出一圈空白，不要被画框裁切、不要贴边。';
+  const bg =
+    backdrop === 'gray'
+      ? '背景必须是一整块均匀的浅灰色幕布（约 #E8E8E8），不是白、不是渐变、没有纹理、没有任何杂物；物体和背景对比清晰，物体边缘不要有灰色描边，四周不要有投影、不要有阴影、不要有光晕。'
+      : '背景必须是一整块均匀的纯绿色色键幕布（chroma key green，约 #00C853），不是白、不是灰、不是渐变；物体四周不要有投影、不要有阴影、不要有光晕；物体表面不要被绿光染到，物体和幕布之间边缘清晰。物体本身的颜色必须和幕布明显不同：黑色、银色、金色、蓝色、红色、粉色、棕色都可以，不要用绿色、墨绿、橄榄绿、荧光绿。';
+  return `${desc}。${view}${frame}${bg}`;
 }
 
 /* ------------------------------------------------ 名称 → 描述 + 尺寸 */
@@ -1012,18 +1148,6 @@ function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 }
 
-function scaleClause() {
-  const target = readTarget();
-  const refs = readRefs().filter((r) => r.w > 0);
-  if (!target.w || !refs.length) return '';
-  const ref = refs[0];
-  const lines = [`尺寸：${target.name}实际宽 ${trim(target.w)} cm${target.h ? `、长 ${trim(target.h)} cm` : ''}；画面里${ref.name}宽约 ${trim(ref.w)} cm。`];
-  lines.push(`${target.name}宽度约为${ref.name}宽度的 ${(target.w / ref.w).toFixed(2)} 倍`);
-  if (target.h && ref.h) lines.push(`${target.name}长度约为${ref.name}长度的 ${(target.h / ref.h).toFixed(2)} 倍`);
-  lines.push('请按这个真实比例摆放，不要放大。');
-  return lines.join('');
-}
-
 function updateCompose() {
   $('composeText').textContent = subjectPrompt();
 }
@@ -1052,16 +1176,52 @@ async function generateSubject() {
 async function runJob(job) {
   job.timer = setInterval(renderJobs, 100);
   try {
-    const meta = await callGenerate(
-      { model: job.model, size: '1024x1024', kind: 'subject', save: false, prompt: job.prompt },
-      job.controller.signal,
-    );
-    const img = new Image();
-    img.src = meta.image;
-    await img.decode();
-    const cut = cutout(img);
-    if (!cut) throw new Error('抠图失败：主体几乎全是白色。换个深色主体，或在描述里写明颜色。');
+    let prompt = job.prompt;
+    let meta = null;
+    let cut = null;
+    let green = 0;
+    // 绿幕会反光染到深色布料上，也可能把边切掉：出问题就换浅灰幕布重画一次
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      meta = await callGenerate(
+        { model: job.model, size: '1024x1024', kind: 'subject', save: false, prompt },
+        job.controller.signal,
+      );
+      const img = new Image();
+      img.src = meta.image;
+      await img.decode();
+      cut = cutout(img);
+      if (!cut) {
+        throw new Error('抠图失败：主体和幕布几乎同色，被整块抠掉了。在描述里写明颜色（比如「深灰色卫衣」）再生成。');
+      }
+      green = greenShare(cut);
+      // 主体本身就是绿的 → 换浅灰幕布；幕布没铺满整张画面（画成卡片/带水印）→ 同样重画
+      const greenish = green > 0.2;
+      // 整块矩形 + 又长又直的边 = 卡片/水印被留下了（方形的手机、充电宝只有其中一条）
+      const slab = cut.__fill > 0.95 && cut.__straight;
+      cut.__slab = slab;
+      const dirty = greenish || cut.__backdropOk === false || slab;
+      if (!dirty || attempt === 2) {
+        cut.__dirty = dirty;
+        break;
+      }
+      job.note = greenish
+        ? '主体偏绿，换浅灰幕布重画一次…'
+        : slab
+          ? '背景里有整块矩形（像卡片/水印），重画一次…'
+          : '背景没铺满整张画面，重画一次…';
+      renderJobs();
+      setStatus(job.note, '');
+      if (greenish) prompt = subjectPrompt('gray');
+    }
     addCandidate(cut, meta);
+    if (cut.__dirty) {
+      setStatus(
+        `这张还是不行（${cut.__slab ? '背景里有整块矩形/水印' : `${Math.round(green * 100)}% 像素和幕布同色`}），没自动保存。` +
+          '再点一次生成，或者在描述里把颜色和形态写具体一点。',
+        'error',
+      );
+      return;
+    }
     autoSaveComposite();
   } catch (err) {
     if (err.name === 'AbortError') {
@@ -1149,9 +1309,12 @@ function matchSubjectBrightness() {
 
   // 底图比主体暗多少，就把主体压暗多少；不调亮（调亮会显得更假）
   let ratio = baseLum / subjLum;
-  ratio = Math.min(1.05, Math.max(0.45, ratio));
+  ratio = Math.min(1.02, Math.max(0.5, ratio));
+  // 只压一半：完全按桌面亮度压，深色主体会被压成一团黑
+  ratio = 1 - (1 - ratio) * 0.5;
+  ratio = Math.max(0.78, ratio);
   // 别做无谓的微调
-  if (Math.abs(ratio - 1) < 0.04) ratio = 1;
+  if (Math.abs(ratio - 1) < 0.03) ratio = 1;
   phone.bright = Math.round(ratio * 100) / 100;
 }
 
@@ -1165,6 +1328,7 @@ function addCandidate(cut, meta) {
     meta,
   };
   state.candidates.unshift(candidate);
+  if (state.candidates.length > 8) state.candidates.length = 8; // 只留最近 8 版，缩略图都是 base64
   applyCandidate(candidate, { autoPlace: true });
   showGenerated({
     url: candidate.thumb,
@@ -1246,7 +1410,14 @@ function renderJobs() {
     cancel.className = 'btn btn-tiny';
     cancel.textContent = '取消';
     cancel.addEventListener('click', () => job.controller.abort());
-    row.append(spinner, name, clock, cancel);
+    row.append(spinner, name, clock);
+    if (job.note) {
+      const note = document.createElement('span');
+      note.className = 'job-msg';
+      note.textContent = job.note;
+      row.append(note);
+    }
+    row.append(cancel);
     box.append(row);
   }
 

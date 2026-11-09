@@ -101,6 +101,38 @@ function sampleKey(px, w, h) {
   return [med(rs), med(gs), med(bs)];
 }
 
+/**
+ * 画面里有没有一大块「绿幕」：有就返回它的中位色（模型偶尔会把绿幕画成卡片）
+ * 每 4 个像素跳一个采样，几百万像素也只要几毫秒。
+ */
+function medianGreenPlate(px, N) {
+  const step = Math.max(1, Math.floor(N / 80000));
+  const rs = [];
+  const gs = [];
+  const bs = [];
+  let total = 0;
+  for (let p = 0; p < N; p += step) {
+    const i = p * 4;
+    const r = px[i];
+    const g = px[i + 1];
+    const b = px[i + 2];
+    total += 1;
+    if (g - Math.max(r, b) >= 30) {
+      rs.push(r);
+      gs.push(g);
+      bs.push(b);
+    }
+  }
+  if (rs.length < total * 0.2) return null; // 面积不够大就别当幕布，免得把绿色物品吃掉
+  const med = (arr) => {
+    arr.sort((a, b) => a - b);
+    return arr[Math.floor(arr.length / 2)];
+  };
+  const out = [med(rs), med(gs), med(bs)];
+  if (out[1] < 110) return null; // 幕布是亮的，暗绿的布料不算
+  return out;
+}
+
 export function cutout(img) {
   const work = document.createElement('canvas');
   work.width = img.naturalWidth || img.width;
@@ -114,8 +146,18 @@ export function cutout(img) {
   const h = work.height;
   const N = w * h;
 
-  const key = sampleKey(px, w, h);
-  const keyKind = classifyKey(key);
+  let key = sampleKey(px, w, h);
+  let keyKind = classifyKey(key);
+
+  // 有的模型会把绿幕画成一张「绿卡片」贴在浅色台面上：四边采样到的是白/灰，
+  // 真正的幕布是中间那块绿。四边采样判成中性、但画面里绿得够多时，改用那块绿当幕布。
+  if (keyKind === 'neutral') {
+    const plate = medianGreenPlate(px, N);
+    if (plate) {
+      key = plate;
+      keyKind = 'green';
+    }
+  }
   const chromatic = keyKind !== 'neutral';
   const keyLum = 0.299 * key[0] + 0.587 * key[1] + 0.114 * key[2];
 
@@ -134,6 +176,25 @@ export function cutout(img) {
     return 0;
   };
   const keyLike = (p) => spillOf(p) >= 26;
+
+  /* --------------------------- 幕布有没有铺满画面（模型有时会画成一张「卡片」） */
+  let hit = 0;
+  let all = 0;
+  const inset = Math.max(2, Math.round(Math.min(w, h) * 0.03));
+  const testPx = (x, y) => {
+    const p = y * w + x;
+    all += 1;
+    if (chromatic ? spillOf(p) >= 26 : keyDistance(px, p * 4, key) < 55) hit += 1;
+  };
+  for (let x = 0; x < w; x += 4) {
+    testPx(x, inset);
+    testPx(x, h - 1 - inset);
+  }
+  for (let y = 0; y < h; y += 4) {
+    testPx(inset, y);
+    testPx(w - 1 - inset, y);
+  }
+  const backdropOk = all > 0 && hit / all > 0.8;
 
   /* ------------------------------------------- 亮度图 / 梯度图 / 底色距离 */
   const lumMap = new Float32Array(N);
@@ -167,8 +228,20 @@ export function cutout(img) {
   // 内孔要严一点：孔里看到的就是同一块底色，只会差几级
   const HOLE_T = Math.max(10, Math.min(26, KEY_T1 * 0.5));
   // 有色幕布的软遮罩带：溢色量 <= LO 算主体，>= HI 算幕布
-  const SPILL_LO = 44;
-  const SPILL_HI = 64;
+  // 幕布自己的「绿度」：亮处 ~117，暗角降到 ~30；阈值必须跟着它走，
+  // 否则暗角（绿度 30 左右）会被当成不透明，留下一整块绿色鬼影
+  const keySpill = chromatic
+    ? Math.max(
+        0,
+        keyKind === 'green'
+          ? key[1] - Math.max(key[0], key[2])
+          : keyKind === 'blue'
+            ? key[2] - Math.max(key[0], key[1])
+            : key[0] - Math.max(key[1], key[2]),
+      )
+    : 0;
+  const SPILL_LO = chromatic ? Math.max(8, Math.round(keySpill * 0.12)) : 44;
+  const SPILL_HI = chromatic ? Math.max(20, Math.round(keySpill * 0.26)) : 64;
 
   /* ---------------------------------------- 1) 从四边 flood（梯度门控） */
   const bg = new Uint8Array(N);
@@ -376,10 +449,10 @@ export function cutout(img) {
       const c0 = px[i];
       const c1 = px[i + 1];
       const c2 = px[i + 2];
-      const edgeW = alpha < 0.95 ? 1 : 0.35; // 边缘本来就该削干净
+      const edgeW = alpha < 0.95 ? 1 : 0.55; // 边缘本来就该削干净；实心面也要削掉反光
       let spill = Math.max(0, Math.min(255, c1 - Math.max(c0, c2)));
-      if (keyKind === 'green' && spill > 8) {
-        const wSpill = Math.max(edgeW, Math.min(0.88, (spill - 8) / 30));
+      if (keyKind === 'green' && spill > 5) {
+        const wSpill = Math.max(edgeW, Math.min(0.92, (spill - 5) / 24));
         px[i + 1] = clamp8(c1 - spill * wSpill);
       } else if (keyKind === 'blue') {
         spill = Math.max(0, Math.min(255, c2 - Math.max(c0, c1)));
@@ -397,6 +470,33 @@ export function cutout(img) {
     }
 
     px[i + 3] = Math.round(alpha * 255);
+  }
+
+  /* --------- 4.5) 整体绿偏置校正：消了溢色之后还剩的那层「绿味」一刀削掉 ---------
+     * 幕布的光会均匀地反到整块主体上，尤其是深色布料，逐像素消色只能削到阈值附近，
+     剩下的一层绿会让深灰变墨绿。这里量一下中位数残差，整体削回去。 */
+  if (chromatic) {
+    const res = [];
+    const step4 = Math.max(1, Math.floor(N / 40000));
+    for (let p = 0; p < N; p += step4) {
+      const i = p * 4;
+      if (px[i + 3] < 220) continue;
+      const sp2 = spillOf(p);
+      if (sp2 > -24) res.push(sp2);
+    }
+    if (res.length > 200) {
+      res.sort((a, b) => a - b);
+      const cast = res[Math.floor(res.length * 0.5)];
+      if (cast > 2) {
+        const drop = Math.min(cast, 30);
+        for (let p = 0; p < N; p += 1) {
+          const i = p * 4;
+          if (px[i + 3] === 0) continue;
+          const sp3 = spillOf(p);
+          if (sp3 > 0) px[i + 1] = clamp8(px[i + 1] - Math.min(sp3, drop));
+        }
+      }
+    }
   }
 
   /* ----------------------------- 5) 只在最大连通块里取外框（丢弃水印碎块） */
@@ -420,6 +520,8 @@ export function cutout(img) {
     if (!solid[i] || seen[i]) continue;
     const stack2 = [i];
     seen[i] = 1;
+    const comp = new Uint8Array(G * G);
+    comp[i] = 1;
     let count = 0;
     let gx0 = G;
     let gx1 = -1;
@@ -446,14 +548,37 @@ export function cutout(img) {
         const nidx = ny * G + nx;
         if (solid[nidx] && !seen[nidx]) {
           seen[nidx] = 1;
+          comp[nidx] = 1;
           stack2.push(nidx);
         }
       }
     }
-    if (!best || count > best.count) best = { count, gx0, gx1, gy0, gy1 };
+    if (!best || count > best.count) best = { count, gx0, gx1, gy0, gy1, cells: comp };
   }
 
   if (!best || best.count < 4) return null;
+
+  /* ---- 只留最大连通块：角落的水印、文字、badge 都清成透明（外扩一格防切边） ---- */
+  const keep = new Uint8Array(G * G);
+  for (let gy2 = 0; gy2 < G; gy2 += 1) {
+    for (let gx2 = 0; gx2 < G; gx2 += 1) {
+      if (!best.cells[gy2 * G + gx2]) continue;
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const nx = gx2 + dx;
+          const ny = gy2 + dy;
+          if (nx >= 0 && ny >= 0 && nx < G && ny < G) keep[ny * G + nx] = 1;
+        }
+      }
+    }
+  }
+  for (let y = 0; y < h; y += 1) {
+    const gy3 = Math.min(G - 1, Math.floor(y / ch0));
+    for (let x = 0; x < w; x += 1) {
+      if (keep[gy3 * G + Math.min(G - 1, Math.floor(x / cw0))]) continue;
+      px[(y * w + x) * 4 + 3] = 0;
+    }
+  }
 
   // 在选中的块里按像素收紧边框
   const x0 = Math.floor(best.gx0 * cw0);
@@ -464,9 +589,11 @@ export function cutout(img) {
   let iy0 = y1;
   let ix1 = x0;
   let iy1 = y0;
+  let solidCount = 0;
   for (let y = y0; y <= y1; y += 1) {
     for (let x = x0; x <= x1; x += 1) {
       if (px[(y * w + x) * 4 + 3] > 150) {
+        solidCount += 1;
         if (x < ix0) ix0 = x;
         if (x > ix1) ix1 = x;
         if (y < iy0) iy0 = y;
@@ -491,6 +618,29 @@ export function cutout(img) {
   out.width = outW;
   out.height = outH;
   out.getContext('2d').drawImage(work, bx0, by0, outW, outH, 0, 0, outW, outH);
+  // 给调用方一点诊断信息：主体是不是被画框切了、幕布是什么色
+  out.__keyKind = keyKind;
+  out.__touchesEdge = ix0 <= 1 || iy0 <= 1 || ix1 >= w - 2 || iy1 >= h - 2;
+  out.__backdropOk = backdropOk;
+  // 不透明像素占外框面积的比例：正常物体 0.3~0.8；接近 1 说明留住了整块矩形（卡片/水印）
+  out.__fill = solidCount / Math.max(1, (ix1 - ix0 + 1) * (iy1 - iy0 + 1));
+  // 卡片/水印残留：会留下一条又长又直的边。真物体的轮廓是波浪的。
+  const edgeVotes = new Map();
+  let rowsChecked = 0;
+  for (let y = 0; y < h; y += 2) {
+    rowsChecked += 1;
+    let first = -1;
+    for (let x = 0; x < w; x += 1) {
+      if (px[(y * w + x) * 4 + 3] > 70) {
+        first = x;
+        break;
+      }
+    }
+    if (first >= 0) edgeVotes.set(first, (edgeVotes.get(first) || 0) + 1);
+  }
+  let edgePeak = 0;
+  for (const v of edgeVotes.values()) if (v > edgePeak) edgePeak = v;
+  out.__straight = rowsChecked > 0 && edgePeak / rowsChecked > 0.22;
   return out;
 }
 
